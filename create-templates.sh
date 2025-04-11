@@ -10,12 +10,12 @@ show_distro_menu() {
     echo "2. Debian 11"
     echo "3. CentOS 9 Stream"
     echo "4. CentOS 8 Stream"
-    echo "5. Ubuntu 22.04"
-    echo "6. Ubuntu 24.04"
-    echo "7. AlmaLinux 8"
-    echo "8. AlmaLinux 9"
-    echo "9. Rocky Linux 8"
-    echo "10. Rocky Linux 9"
+    echo "5. Ubuntu 24.04"
+    echo "6. Ubuntu 22.04"
+    echo "7. AlmaLinux 9"
+    echo "8. AlmaLinux 8"
+    echo "9. Rocky Linux 9"
+    echo "10. Rocky Linux 8"
     echo -n "请输入选项 (1-10)："
     read -r choice
 
@@ -45,40 +45,40 @@ show_distro_menu() {
             vm_name="CentOS-8"
             ;;
         5)
-            distro="ubuntu22"
-            image_url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
-            image_file="jammy-server-cloudimg-amd64.img"
-            vm_name="Ubuntu-22"
-            ;;
-        6)
             distro="ubuntu24"
             image_url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
             image_file="noble-server-cloudimg-amd64.img"
             vm_name="Ubuntu-24"
             ;;
-        7)
-            distro="alma8"
-            image_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
-            image_file="AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
-            vm_name="AlmaLinux-8"
+        6)
+            distro="ubuntu22"
+            image_url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+            image_file="jammy-server-cloudimg-amd64.img"
+            vm_name="Ubuntu-22"
             ;;
-        8)
+        7)
             distro="alma9"
             image_url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
             image_file="AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
             vm_name="AlmaLinux-9"
             ;;
+        8)
+            distro="alma8"
+            image_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            image_file="AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            vm_name="AlmaLinux-8"
+            ;;
         9)
+            distro="rocky9"
+            image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            vm_name="Rocky-9"
+            ;;
+        10)
             distro="rocky8"
             image_url="https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2"
             image_file="Rocky-8-GenericCloud.latest.x86_64.qcow2"
             vm_name="Rocky-8"
-            ;;
-        10)
-            distro="rocky9"
-            image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
-            image_file="Rocky-9-GenericCloud-latest.x86_64.qcow2"
-            vm_name="Rocky-9"
             ;;
         *)
             echo "无效选项，请选择 1-10 之间的数字。"
