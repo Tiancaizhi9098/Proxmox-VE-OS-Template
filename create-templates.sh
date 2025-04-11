@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 函数：显示发行版选项菜单
+# 函数：显示发行版选项菜单（仅在交互模式下使用）
 show_distro_menu() {
     echo "====================================="
     echo "欢迎使用 Proxmox VE 虚拟机模板创建脚本"
@@ -91,6 +91,85 @@ show_distro_menu() {
     read -r vmid
     if ! [[ "$vmid" =~ ^[0-9]+$ ]]; then
         echo "VMID 必须是数字。"
+        exit 1
+    fi
+}
+
+# 函数：通过参数设置发行版和 VMID（非交互模式）
+set_distro_and_vmid() {
+    local choice=$1
+    local input_vmid=$2
+
+    case $choice in
+        1)
+            distro="debian12"
+            image_url="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+            image_file="debian-12-generic-amd64.qcow2"
+            vm_name="Debian-12"
+            ;;
+        2)
+            distro="debian11"
+            image_url="https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
+            image_file="debian-11-generic-amd64.qcow2"
+            vm_name="Debian-11"
+            ;;
+        3)
+            distro="centos9"
+            image_url="https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+            image_file="CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+            vm_name="CentOS-9"
+            ;;
+        4)
+            distro="centos8"
+            image_url="https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
+            image_file="CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
+            vm_name="CentOS-8"
+            ;;
+        5)
+            distro="ubuntu24"
+            image_url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+            image_file="noble-server-cloudimg-amd64.img"
+            vm_name="Ubuntu-24"
+            ;;
+        6)
+            distro="ubuntu22"
+            image_url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+            image_file="jammy-server-cloudimg-amd64.img"
+            vm_name="Ubuntu-22"
+            ;;
+        7)
+            distro="alma9"
+            image_url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+            image_file="AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+            vm_name="AlmaLinux-9"
+            ;;
+        8)
+            distro="alma8"
+            image_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            image_file="AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            vm_name="AlmaLinux-8"
+            ;;
+        9)
+            distro="rocky9"
+            image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            vm_name="Rocky-9"
+            ;;
+        10)
+            distro="rocky8"
+            image_url="https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-8-GenericCloud.latest.x86_64.qcow2"
+            vm_name="Rocky-8"
+            ;;
+        *)
+            echo "无效选项：$choice，请选择 1-10 之间的数字。"
+            exit 1
+            ;;
+    esac
+
+    vmid=$input_vmid
+    if ! [[ "$vmid" =~ ^[0-9]+$ ]]; then
+        echo "VMID 必须是数字：$vmid"
         exit 1
     fi
 }
@@ -195,8 +274,13 @@ convert_to_template() {
 
 # 主函数
 main() {
-    # 显示发行版选项菜单并获取用户输入
-    show_distro_menu
+    # 如果提供了参数（发行版选项和 VMID），则使用参数运行
+    if [ $# -eq 2 ]; then
+        set_distro_and_vmid "$1" "$2"
+    else
+        # 否则进入交互模式
+        show_distro_menu
+    fi
 
     # 检查并销毁已存在的虚拟机
     destroy_existing_vm $vmid
@@ -225,4 +309,4 @@ main() {
 }
 
 # 运行主函数
-main
+main "$@"
