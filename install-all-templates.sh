@@ -63,8 +63,7 @@ create_all_templates() {
         echo "====================================="
 
         # 直接调用 create-templates.sh，传递发行版选项和 VMID
-        # 模拟销毁确认（自动输入 Y）
-        # 模拟网络接口和存储输入
+        # 模拟销毁确认（自动输入 Y），并提供网络接口和存储
         echo -e "Y\n$vmbr\n$storage" | ./create-templates.sh $distro_option $current_vmid
 
         if [ $? -ne 0 ]; then
