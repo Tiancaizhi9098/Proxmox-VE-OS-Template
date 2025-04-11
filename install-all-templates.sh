@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# 函数：提示用户输入网络接口和存储
+prompt_for_network_and_storage() {
+    echo -n "请输入网络接口（例如 vmbr0，默认为 vmbr0）："
+    read -r vmbr
+    if [ -z "$vmbr" ]; then
+        vmbr="vmbr0"
+    fi
+
+    echo -n "请输入存储名称（例如 local，默认为 local）："
+    read -r storage
+    if [ -z "$storage" ]; then
+        storage="local"
+    fi
+}
+
 # 函数：下载 create-templates.sh 脚本
 download_create_templates() {
     echo "正在下载 create-templates.sh 脚本..."
@@ -29,17 +44,31 @@ create_all_templates() {
     local distro_count=10  # 总共有 10 个发行版
     local current_vmid=$start_vmid
 
+    # 发行版名称（仅用于显示）
+    declare -A distro_names
+    distro_names[1]="Debian 12"
+    distro_names[2]="Debian 11"
+    distro_names[3]="CentOS 9 Stream"
+    distro_names[4]="CentOS 8 Stream"
+    distro_names[5]="Ubuntu 22.04"
+    distro_names[6]="Ubuntu 24.04"
+    distro_names[7]="AlmaLinux 8"
+    distro_names[8]="AlmaLinux 9"
+    distro_names[9]="Rocky Linux 8"
+    distro_names[10]="Rocky Linux 9"
+
     for distro_option in $(seq 1 $distro_count); do
         echo "====================================="
-        echo "正在为发行版选项 $distro_option 创建模板，VMID: $current_vmid"
+        echo "正在为 ${distro_names[$distro_option]} 创建模板，VMID: $current_vmid"
         echo "====================================="
 
         # 直接调用 create-templates.sh，传递发行版选项和 VMID
         # 模拟销毁确认（自动输入 Y）
-        echo "Y" | ./create-templates.sh $distro_option $current_vmid
+        # 模拟网络接口和存储输入
+        echo -e "Y\n$vmbr\n$storage" | ./create-templates.sh $distro_option $current_vmid
 
         if [ $? -ne 0 ]; then
-            echo "创建发行版选项 $distro_option (VMID: $current_vmid) 失败，脚本退出。"
+            echo "创建 ${distro_names[$distro_option]} (VMID: $current_vmid) 失败，脚本退出。"
             exit 1
         fi
 
@@ -54,6 +83,9 @@ main() {
     echo "开始一键安装所有 Proxmox VE 模板"
     echo "VMID 将从 8000 开始递增"
     echo "====================================="
+
+    # 提示用户输入网络接口和存储
+    prompt_for_network_and_storage
 
     # 检查并下载 create-templates.sh
     check_create_templates
