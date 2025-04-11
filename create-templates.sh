@@ -2,6 +2,9 @@
 
 # 函数：显示发行版选项菜单
 show_distro_menu() {
+    echo "====================================="
+    echo "欢迎使用 Proxmox VE 虚拟机模板创建脚本"
+    echo "====================================="
     echo "请选择要创建的发行版："
     echo "1. Debian 12"
     echo "2. Debian 11"
@@ -74,7 +77,7 @@ show_distro_menu() {
         10)
             distro="rocky9"
             image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
-            image_file="Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-9-GenericCloud-latest.x86_64.qcow2"
             vm_name="Rocky-9"
             ;;
         *)
@@ -123,6 +126,7 @@ download_image() {
     wget -O /tmp/$file $url
     if [ $? -ne 0 ]; then
         echo "下载失败：$url"
+        echo "请检查网络连接或镜像地址是否有效。"
         exit 1
     fi
 }
@@ -131,6 +135,7 @@ download_image() {
 create_vm() {
     local vmid=$1
     local vm_name=$2
+    echo "正在创建虚拟机 $vm_name (VMID: $vmid)..."
     # 创建虚拟机时不添加默认硬盘
     qm create $vmid --memory 2048 --core 2 --name $vm_name --net0 virtio,bridge=vmbr3 --ide0 none
     if [ $? -ne 0 ]; then
@@ -214,7 +219,9 @@ main() {
     # 清理临时文件
     rm /tmp/$image_file
 
+    echo "====================================="
     echo "虚拟机模板 $vm_name (VMID: $vmid) 创建并转换为模板完成！"
+    echo "====================================="
 }
 
 # 运行主函数
