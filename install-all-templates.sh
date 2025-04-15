@@ -1,17 +1,57 @@
 #!/bin/bash
 
-# 函数：提示用户输入网络接口和存储
-prompt_for_network_and_storage() {
+# 函数：显示存储选择菜单并获取存储名称
+prompt_for_storage() {
+    echo "====================================="
+    echo "请选择存储目标："
+    echo "====================================="
+
+    # 获取所有可用存储，并保存到数组
+    local storages=()
+    local paths=()
+    local types=()
+    local index=1
+
+    # 使用 pvesm status 获取存储信息
+    while IFS=' ' read -r name type status total used avail; do
+        if [[ "$status" == "active" && "$name" != "Name" ]]; then
+            # 获取存储路径
+            path=$(pvesm path $name 2>/dev/null || echo "未知路径")
+            storages[$index]=$name
+            paths[$index]=$path
+            types[$index]=$type
+            echo "$index. $name (类型: $type, 路径: $path)"
+            ((index++))
+        fi
+    done < <(pvesm status)
+
+    if [ ${#storages[@]} -eq 0 ]; then
+        echo "错误：未找到可用的存储。请检查存储配置："
+        echo "  pvesm status"
+        exit 1
+    fi
+
+    # 提示用户选择存储
+    echo -n "请输入选项 (1-${#storages[@]})："
+    read -r choice
+
+    # 验证用户输入
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#storages[@]} ]; then
+        echo "无效选项，请选择 1-${#storages[@]} 之间的数字。"
+        exit 1
+    fi
+
+    # 设置存储名称
+    storage=${storages[$choice]}
+    echo "已选择存储：$storage (路径: ${paths[$choice]})"
+}
+
+# 函数：提示用户输入网络接口
+prompt_for_network() {
     echo -n "请输入网络接口（例如 vmbr0，默认为 vmbr0）："
     read -r vmbr
     if [ -z "$vmbr" ]; then
         vmbr="vmbr0"
-    fi
-
-    echo -n "请输入存储名称（例如 local，默认为 local）："
-    read -r storage
-    if [ -z "$storage" ]; then
-        storage="local"
     fi
 }
 
@@ -150,12 +190,6 @@ import_disk() {
         echo "导入磁盘失败：$image_file"
         exit 1
     fi
-    # 检查导入的磁盘文件是否存在（路径可能因存储类型不同而变化）
-    if [ ! -f "/var/lib/vz/images/$vmid/vm-$vmid-disk-0.qcow2" ]; then
-        echo "警告：未在 /var/lib/vz/images/$vmid/ 找到磁盘文件，可能是存储路径不同，请手动检查。"
-    else
-        echo "磁盘文件 /var/lib/vz/images/$vmid/vm-$vmid-disk-0.qcow2 已成功生成。"
-    fi
 }
 
 # 函数：配置虚拟机
@@ -163,17 +197,18 @@ configure_vm() {
     local vmid=$1
     local storage=$2
     # 设置 SCSI 控制器并挂载导入的磁盘
-    echo "正在挂载磁盘 $storage:$vmid/vm-$vmid-disk-0.qcow2 到 scsi0..."
-    qm set $vmid --scsihw virtio-scsi-pci --scsi0 $storage:$vmid/vm-$vmid-disk-0.qcow2
+    echo "正在挂载磁盘 $storage:vm-$vmid-disk-0 到 scsi0..."
+    qm set $vmid --scsihw virtio-scsi-pci --scsi0 $storage:vm-$vmid-disk-0
     if [ $? -ne 0 ]; then
         echo "挂载磁盘到 scsi0 失败：VMID $vmid"
-        # 打印存储内容以供调试
-        echo "当前 $storage 存储内容："
-        ls -lh /var/lib/vz/images/$vmid/ 2>/dev/null || echo "无法列出存储内容，可能是存储路径不同。"
         exit 1
     fi
     # 配置 CloudInit、启动顺序等
     qm set $vmid --ide2 $storage:cloudinit
+    if [ $? -ne 0 ]; then
+        echo "配置 CloudInit 失败：VMID $vmid"
+        exit 1
+    fi
     qm set $vmid --boot c --bootdisk scsi0
     qm set $vmid --serial0 socket --vga serial0
 }
@@ -264,8 +299,11 @@ main() {
     echo "VMID 将从 8000 开始递增"
     echo "====================================="
 
-    # 提示用户输入网络接口和存储
-    prompt_for_network_and_storage
+    # 提示用户输入网络接口
+    prompt_for_network
+
+    # 提示用户选择存储
+    prompt_for_storage
 
     # 创建所有模板
     create_all_templates
