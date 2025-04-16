@@ -89,16 +89,79 @@ prompt_for_storage() {
 # 函数：验证存储名称
 validate_storage() {
     local storage_name=$1
+    # 检查存储是否存在
     if ! pvesm status | grep -q "^$storage_name "; then
         echo "错误：存储名称 '$storage_name' 不存在。请检查存储配置："
         echo "  pvesm status"
         exit 1
     fi
-    # 验证存储路径是否可获取
-    if ! pvesm path $storage_name >/dev/null 2>&1; then
-        echo "错误：无法获取存储 '$storage_name' 的路径。请检查存储配置："
-        echo "  pvesm path $storage_name"
-        exit 1
+
+    # 获取存储类型
+    storage_type=$(pvesm status | grep "^$storage_name " | awk '{print $2}')
+    echo "存储 '$storage_name' 的类型为：$storage_type"
+
+    # 对于 nfs 类型的存储，跳过 pvesm path 验证，直接检查挂载点
+    if [ "$storage_type" = "nfs" ]; then
+        echo "检测到 nfs 类型存储，跳过 pvesm path 验证..."
+        # 从 storage.cfg 中获取 NFS 挂载点路径
+        nfs_path=$(grep "^nfs: $storage_name" -A 5 /etc/pve/storage.cfg | grep "path" | awk '{print $2}')
+        if [ -z "$nfs_path" ]; then
+            echo "错误：无法从 storage.cfg 中获取 NFS 挂载点路径。请检查存储配置："
+            echo "  cat /etc/pve/storage.cfg"
+            exit 1
+        fi
+        # 验证挂载点是否存在
+        if [ ! -d "$nfs_path" ]; then
+            echo "错误：NFS 挂载点 '$nfs_path' 不存在。请检查 NFS 配置并尝试重新挂载："
+            echo "  pvesm set $storage_name --disable 1"
+            echo "  pvesm set $storage_name --disable 0"
+            exit 1
+        fi
+        # 验证挂载点是否可写
+        if ! touch "$nfs_path/.test_write" 2>/dev/null; then
+            echo "错误：无法写入 NFS 挂载点 '$nfs_path'。请检查权限或 NFS 服务器配置。"
+            exit 1
+        fi
+        rm -f "$nfs_path/.test_write"
+        echo "NFS 存储 '$storage_name' 验证通过，挂载点为：$nfs_path"
+    # 对于 zfspool 类型的存储，跳过 pvesm path 验证
+    elif [ "$storage_type" = "zfspool" ]; then
+        echo "检测到 zfspool 类型存储，跳过 pvesm path 验证..."
+        # 尝试获取 ZFS 池名称并验证
+        zfs_pool=$(grep "^zfspool: $storage_name" -A 1 /etc/pve/storage.cfg | grep "pool" | awk '{print $2}')
+        if [ -z "$zfs_pool" ]; then
+            echo "错误：无法从 storage.cfg 中获取 ZFS 池名称。请检查存储配置："
+            echo "  cat /etc/pve/storage.cfg"
+            exit 1
+        fi
+        # 验证 ZFS 池是否存在
+        if ! zpool list | grep -q "^$zfs_pool "; then
+            echo "错误：ZFS 池 '$zfs_pool' 不存在或未挂载。请检查 ZFS 配置："
+            echo "  zpool list"
+            exit 1
+        fi
+        # 获取 ZFS 挂载点
+        zfs_mountpoint=$(zfs get -H -o value mountpoint $zfs_pool)
+        if [ -z "$zfs_mountpoint" ]; then
+            echo "错误：无法获取 ZFS 池 '$zfs_pool' 的挂载点。请检查 ZFS 配置："
+            echo "  zfs get mountpoint $zfs_pool"
+            exit 1
+        fi
+        if [ ! -d "$zfs_mountpoint" ]; then
+            echo "错误：ZFS 挂载点 '$zfs_mountpoint' 不存在。请尝试手动挂载："
+            echo "  zfs mount $zfs_pool"
+            exit 1
+        fi
+        echo "ZFS 池 '$zfs_pool' 验证通过，挂载点为：$zfs_mountpoint"
+    else
+        # 对于其他类型的存储，验证路径是否可获取
+        if ! pvesm path $storage_name >/dev/null 2>&1; then
+            echo "错误：无法获取存储 '$storage_name' 的路径。请检查存储配置："
+            echo "  pvesm path $storage_name"
+            exit 1
+        fi
+        storage_path=$(pvesm path $storage_name)
+        echo "存储 '$storage_name' 的路径为：$storage_path"
     fi
 }
 
