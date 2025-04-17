@@ -1,5 +1,45 @@
 #!/bin/bash
 
+# 函数：显示网卡选择菜单并获取网卡名称
+prompt_for_network() {
+    echo "====================================="
+    echo "请选择网络接口："
+    echo "====================================="
+
+    # 获取所有网络接口，并保存到数组
+    local interfaces=()
+    local index=1
+
+    # 使用 ip link 获取网络接口
+    while IFS=': ' read -r num iface rest; do
+        if [[ "$num" =~ ^[0-9]+$ && -n "$iface" && "$iface" != "lo" ]]; then
+            interfaces[$index]=$iface
+            echo "$index. $iface"
+            ((index++))
+        fi
+    done < <(ip link | grep '^[0-9]')
+
+    if [ ${#interfaces[@]} -eq 0 ]; then
+        echo "错误：未找到可用的网络接口。请检查网络配置："
+        echo "  ip link"
+        exit 1
+    fi
+
+    # 提示用户选择网卡
+    echo -n "请输入选项 (1-${#interfaces[@]})："
+    read -r choice
+
+    # 验证用户输入
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#interfaces[@]} ]; then
+        echo "无效选项，请选择 1-${#interfaces[@]} 之间的数字。"
+        exit 1
+    fi
+
+    # 设置网卡名称
+    vmbr=${interfaces[$choice]}
+    echo "已选择网络接口：$vmbr"
+}
+
 # 函数：显示存储选择菜单并获取存储名称
 prompt_for_storage() {
     echo "====================================="
@@ -44,15 +84,6 @@ prompt_for_storage() {
     # 设置存储名称
     storage=${storages[$choice]}
     echo "已选择存储：$storage (路径: ${paths[$choice]})"
-}
-
-# 函数：提示用户输入网络接口
-prompt_for_network() {
-    echo -n "请输入网络接口（例如 vmbr0，默认为 vmbr0）："
-    read -r vmbr
-    if [ -z "$vmbr" ]; then
-        vmbr="vmbr0"
-    fi
 }
 
 # 函数：设置发行版信息
@@ -299,7 +330,7 @@ main() {
     echo "VMID 将从 8000 开始递增"
     echo "====================================="
 
-    # 提示用户输入网络接口
+    # 提示用户选择网络接口
     prompt_for_network
 
     # 提示用户选择存储
