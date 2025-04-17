@@ -1,93 +1,117 @@
 #!/bin/bash
 
-# 函数：显示网卡选择菜单并获取网卡名称
-prompt_for_network() {
-    echo "====================================="
-    echo "请选择网络接口："
-    echo "====================================="
-
-    # 获取所有网络接口，并保存到数组
-    local interfaces=()
-    local index=1
-
-    # 使用 ip link 获取网络接口
-    while IFS=': ' read -r num iface rest; do
-        if [[ "$num" =~ ^[0-9]+$ && -n "$iface" && "$iface" != "lo" ]]; then
-            interfaces[$index]=$iface
-            echo "$index. $iface"
-            ((index++))
-        fi
-    done < <(ip link | grep '^[0-9]')
-
-    if [ ${#interfaces[@]} -eq 0 ]; then
-        echo "错误：未找到可用的网络接口。请检查网络配置："
-        echo "  ip link"
-        exit 1
+# 函数：提示用户输入网络接口和存储
+prompt_for_network_and_storage() {
+    echo -n "请输入网络接口（例如 vmbr0，默认为 vmbr0）："
+    read -r vmbr
+    if [ -z "$vmbr" ]; then
+        vmbr="vmbr0"
     fi
 
-    # 提示用户选择网卡
-    echo -n "请输入选项 (1-${#interfaces[@]})："
-    read -r choice
-
-    # 验证用户输入
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#interfaces[@]} ]; then
-        echo "无效选项，请选择 1-${#interfaces[@]} 之间的数字。"
-        exit 1
+    echo -n "请输入存储名称（例如 local，默认为 local）："
+    read -r storage
+    if [ -z "$storage" ]; then
+        storage="local"
     fi
-
-    # 设置网卡名称
-    vmbr=${interfaces[$choice]}
-    echo "已选择网络接口：$vmbr"
 }
 
-# 函数：显示存储选择菜单并获取存储名称
-prompt_for_storage() {
+# 函数：显示发行版选项菜单（仅在交互模式下使用）
+show_distro_menu() {
     echo "====================================="
-    echo "请选择存储目标："
+    echo "欢迎使用 Proxmox VE 虚拟机模板创建脚本"
     echo "====================================="
-
-    # 获取所有可用存储，并保存到数组
-    local storages=()
-    local paths=()
-    local types=()
-    local index=1
-
-    # 使用 pvesm status 获取存储信息
-    while IFS=' ' read -r name type status total used avail; do
-        if [[ "$status" == "active" && "$name" != "Name" ]]; then
-            # 获取存储路径
-            path=$(pvesm path $name 2>/dev/null || echo "未知路径")
-            storages[$index]=$name
-            paths[$index]=$path
-            types[$index]=$type
-            echo "$index. $name (类型: $type, 路径: $path)"
-            ((index++))
-        fi
-    done < <(pvesm status)
-
-    if [ ${#storages[@]} -eq 0 ]; then
-        echo "错误：未找到可用的存储。请检查存储配置："
-        echo "  pvesm status"
-        exit 1
-    fi
-
-    # 提示用户选择存储
-    echo -n "请输入选项 (1-${#storages[@]})："
+    echo "请选择要创建的发行版："
+    echo "1. Debian 12"
+    echo "2. Debian 11"
+    echo "3. CentOS 9 Stream"
+    echo "4. CentOS 8 Stream"
+    echo "5. Ubuntu 22.04"
+    echo "6. Ubuntu 24.04"
+    echo "7. AlmaLinux 8"
+    echo "8. AlmaLinux 9"
+    echo "9. Rocky Linux 8"
+    echo "10. Rocky Linux 9"
+    echo -n "请输入选项 (1-10)："
     read -r choice
 
-    # 验证用户输入
-    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#storages[@]} ]; then
-        echo "无效选项，请选择 1-${#storages[@]} 之间的数字。"
+    case $choice in
+        1)
+            distro="debian12"
+            image_url="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+            image_file="debian-12-generic-amd64.qcow2"
+            vm_name="Debian-12"
+            ;;
+        2)
+            distro="debian11"
+            image_url="https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
+            image_file="debian-11-generic-amd64.qcow2"
+            vm_name="Debian-11"
+            ;;
+        3)
+            distro="centos9"
+            image_url="https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+            image_file="CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+            vm_name="CentOS-9"
+            ;;
+        4)
+            distro="centos8"
+            image_url="https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
+            image_file="CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
+            vm_name="CentOS-8"
+            ;;
+        5)
+            distro="ubuntu22"
+            image_url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+            image_file="jammy-server-cloudimg-amd64.img"
+            vm_name="Ubuntu-22"
+            ;;
+        6)
+            distro="ubuntu24"
+            image_url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+            image_file="noble-server-cloudimg-amd64.img"
+            vm_name="Ubuntu-24"
+            ;;
+        7)
+            distro="alma8"
+            image_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            image_file="AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+            vm_name="AlmaLinux-8"
+            ;;
+        8)
+            distro="alma9"
+            image_url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+            image_file="AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+            vm_name="AlmaLinux-9"
+            ;;
+        9)
+            distro="rocky8"
+            image_url="https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-8-GenericCloud.latest.x86_64.qcow2"
+            vm_name="Rocky-8"
+            ;;
+        10)
+            distro="rocky9"
+            image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            image_file="Rocky-9-GenericCloud.latest.x86_64.qcow2"
+            vm_name="Rocky-9"
+            ;;
+        *)
+            echo "无效选项，请选择 1-10 之间的数字。"
+            exit 1
+            ;;
+    esac
+
+    # 提示用户输入 VMID
+    echo -n "请输入 VMID（例如 8000）："
+    read -r vmid
+    if ! [[ "$vmid" =~ ^[0-9]+$ ]]; then
+        echo "VMID 必须是数字。"
         exit 1
     fi
-
-    # 设置存储名称
-    storage=${storages[$choice]}
-    echo "已选择存储：$storage (路径: ${paths[$choice]})"
 }
 
-# 函数：设置发行版信息
-set_distro_info() {
+# 函数：通过参数设置发行版和 VMID（非交互模式）
+set_distro_and_vmid() {
     local choice=$1
     local input_vmid=$2
 
@@ -97,80 +121,60 @@ set_distro_info() {
             image_url="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
             image_file="debian-12-generic-amd64.qcow2"
             vm_name="Debian-12"
-            sha256_url="https://cloud.debian.org/images/cloud/bookworm/latest/SHA256SUMS"
-            package_manager="apt"
             ;;
         2)
             distro="debian11"
             image_url="https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
             image_file="debian-11-generic-amd64.qcow2"
             vm_name="Debian-11"
-            sha256_url="https://cloud.debian.org/images/cloud/bullseye/latest/SHA256SUMS"
-            package_manager="apt"
             ;;
         3)
             distro="centos9"
             image_url="https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
             image_file="CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
             vm_name="CentOS-9"
-            sha256_url="https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2.SHA256SUM"
-            package_manager="dnf"
             ;;
         4)
             distro="centos8"
             image_url="https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
             image_file="CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
             vm_name="CentOS-8"
-            sha256_url="https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2.SHA256SUM"
-            package_manager="dnf"
             ;;
         5)
             distro="ubuntu22"
             image_url="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
             image_file="jammy-server-cloudimg-amd64.img"
             vm_name="Ubuntu-22"
-            sha256_url="https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS"
-            package_manager="apt"
             ;;
         6)
             distro="ubuntu24"
             image_url="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
             image_file="noble-server-cloudimg-amd64.img"
             vm_name="Ubuntu-24"
-            sha256_url="https://cloud-images.ubuntu.com/noble/current/SHA256SUMS"
-            package_manager="apt"
             ;;
         7)
             distro="alma8"
             image_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
             image_file="AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
             vm_name="AlmaLinux-8"
-            sha256_url="https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2.sha256"
-            package_manager="dnf"
             ;;
         8)
             distro="alma9"
             image_url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
             image_file="AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
             vm_name="AlmaLinux-9"
-            sha256_url="https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2.sha256"
-            package_manager="dnf"
             ;;
         9)
             distro="rocky8"
             image_url="https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2"
             image_file="Rocky-8-GenericCloud.latest.x86_64.qcow2"
             vm_name="Rocky-8"
-            sha256_url="https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud.latest.x86_64.qcow2.sha256sum"
-            package_manager="dnf"
             ;;
         10)
             distro="rocky9"
             image_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2"
             image_file="Rocky-9-GenericCloud.latest.x86_64.qcow2"
             vm_name="Rocky-9"
-            sha256_url="https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2.sha256sum"
-            package_manager="dnf"
             ;;
         *)
             echo "无效选项：$choice，请选择 1-10 之间的数字。"
@@ -185,60 +189,17 @@ set_distro_info() {
     fi
 }
 
-# 函数：下载并验证镜像
-download_and_verify_image() {
-    local url=$1
-    local file=$2
-    local sha256_url=$3
-
-    # 下载镜像
-    echo "正在下载 $file ..."
-    wget -O /tmp/$file $url
-    if [ $? -ne 0 ]; then
-        echo "下载失败：$url"
-        echo "请检查网络连接或镜像地址是否有效。"
-        exit 1
-    fi
-
-    # 下载校验和文件
-    echo "正在下载校验和文件..."
-    wget -O /tmp/SHA256SUMS $sha256_url
-    if [ $? -ne 0 ]; then
-        echo "下载校验和文件失败：$sha256_url"
-        echo "将跳过校验和验证，继续创建模板。"
-        return
-    fi
-
-    # 计算本地文件的 SHA256 校验和
-    local_sha256=$(sha256sum /tmp/$file | awk '{print $1}')
-    echo "本地文件 SHA256 校验和：$local_sha256"
-
-    # 从校验和文件中提取目标文件的校验和
-    expected_sha256=$(grep $file /tmp/SHA256SUMS | awk '{print $1}')
-    if [ -z "$expected_sha256" ]; then
-        echo "未在校验和文件中找到 $file 的校验和，跳过验证。"
-        rm /tmp/SHA256SUMS
-        return
-    fi
-    echo "预期 SHA256 校验和：$expected_sha256"
-
-    # 比较校验和
-    if [ "$local_sha256" != "$expected_sha256" ]; then
-        echo "校验和不匹配，镜像文件可能已损坏。"
-        rm /tmp/$file /tmp/SHA256SUMS
-        exit 1
-    fi
-    echo "校验和验证通过！"
-
-    # 清理校验和文件
-    rm /tmp/SHA256SUMS
-}
-
-# 函数：检查并销毁已存在的虚拟机（自动确认销毁）
+# 函数：检查并销毁已存在的虚拟机（带确认）
 destroy_existing_vm() {
     local vmid=$1
     if qm status $vmid >/dev/null 2>&1; then
-        echo "检测到 VMID $vmid 已存在，自动销毁..."
+        echo "检测到 VMID $vmid 已存在，是否销毁？（输入 Y/y 确认，其他键取消）"
+        read -r confirm
+        if [[ "$confirm" != "Y" && "$confirm" != "y" ]]; then
+            echo "用户取消销毁操作，脚本退出。"
+            exit 1
+        fi
+        echo "正在销毁 VMID $vmid..."
         # 停止虚拟机（如果正在运行）
         qm stop $vmid 2>/dev/null
         # 销毁虚拟机
@@ -251,14 +212,27 @@ destroy_existing_vm() {
     fi
 }
 
+# 函数：下载镜像
+download_image() {
+    local url=$1
+    local file=$2
+    echo "正在下载 $file ..."
+    wget -O /tmp/$file $url
+    if [ $? -ne 0 ]; then
+        echo "下载失败：$url"
+        echo "请检查网络连接或镜像地址是否有效。"
+        exit 1
+    fi
+}
+
 # 函数：创建虚拟机
 create_vm() {
     local vmid=$1
     local vm_name=$2
     local vmbr=$3
     echo "正在创建虚拟机 $vm_name (VMID: $vmid)..."
-    # 创建虚拟机，使用 host CPU 类型，启用 QEMU Guest Agent
-    qm create $vmid --memory 2048 --cores 2 --cpu host --name $vm_name --net0 virtio,bridge=$vmbr --ide0 none --agent 1
+    # 创建虚拟机时不添加默认硬盘，使用用户指定的网络接口
+    qm create $vmid --memory 2048 --core 2 --name $vm_name --net0 virtio,bridge=$vmbr --ide0 none
     if [ $? -ne 0 ]; then
         echo "创建虚拟机失败：VMID $vmid"
         exit 1
@@ -277,91 +251,32 @@ import_disk() {
         echo "导入磁盘失败：$image_file"
         exit 1
     fi
+    # 检查导入的磁盘文件是否存在（路径可能因存储类型不同而变化）
+    if [ ! -f "/var/lib/vz/images/$vmid/vm-$vmid-disk-0.qcow2" ]; then
+        echo "警告：未在 /var/lib/vz/images/$vmid/ 找到磁盘文件，可能是存储路径不同，请手动检查。"
+    else
+        echo "磁盘文件 /var/lib/vz/images/$vmid/vm-$vmid-disk-0.qcow2 已成功生成。"
+    fi
 }
 
-# 函数：配置 CloudInit 并注入用户数据
-configure_cloudinit() {
+# 函数：配置虚拟机
+configure_vm() {
     local vmid=$1
     local storage=$2
-    local package_manager=$3
-
     # 设置 SCSI 控制器并挂载导入的磁盘
-    echo "正在挂载磁盘 $storage:vm-$vmid-disk-0 到 scsi0..."
-    qm set $vmid --scsihw virtio-scsi-pci --scsi0 $storage:vm-$vmid-disk-0
+    echo "正在挂载磁盘 $storage:$vmid/vm-$vmid-disk-0.qcow2 到 scsi0..."
+    qm set $vmid --scsihw virtio-scsi-pci --scsi0 $storage:$vmid/vm-$vmid-disk-0.qcow2
     if [ $? -ne 0 ]; then
         echo "挂载磁盘到 scsi0 失败：VMID $vmid"
+        # 打印存储内容以供调试
+        echo "当前 $storage 存储内容："
+        ls -lh /var/lib/vz/images/$vmid/ 2>/dev/null || echo "无法列出存储内容，可能是存储路径不同。"
         exit 1
     fi
-
     # 配置 CloudInit、启动顺序等
     qm set $vmid --ide2 $storage:cloudinit
-    if [ $? -ne 0 ]; then
-        echo "配置 CloudInit 失败：VMID $vmid"
-        exit 1
-    fi
     qm set $vmid --boot c --bootdisk scsi0
     qm set $vmid --serial0 socket --vga serial0
-
-    # 生成 CloudInit 用户数据脚本
-    echo "生成 CloudInit 用户数据..."
-    cat > /tmp/user-data <<EOF
-#cloud-config
-# 启用 root 登录并设置密码
-chpasswd:
-  list: |
-    root:password123
-  expire: False
-
-# 修改 SSH 配置以允许 root 登录
-runcmd:
-  - sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
-  - systemctl restart sshd
-
-# 根据发行版安装 qemu-guest-agent
-  - if [ "$package_manager" = "apt" ]; then
-      apt update && apt install -y qemu-guest-agent && systemctl enable qemu-guest-agent && systemctl start qemu-guest-agent
-    elif [ "$package_manager" = "dnf" ]; then
-      dnf install -y qemu-guest-agent && systemctl enable qemu-guest-agent && systemctl start qemu-guest-agent
-    fi
-
-# 清除 machine-id
-  - truncate -s 0 /etc/machine-id
-  - if [ -f /var/lib/dbus/machine-id ]; then truncate -s 0 /var/lib/dbus/machine-id; fi
-
-# 确保所有更改写入磁盘
-  - sync
-EOF
-
-    # 将用户数据编码为 base64 并注入到 CloudInit
-    user_data_base64=$(base64 -w 0 /tmp/user-data)
-    qm set $vmid --cicustom "user=local:snippets/user-data-$vmid.yml"
-    echo "user: $user_data_base64" > /var/lib/vz/snippets/user-data-$vmid.yml
-
-    # 清理临时文件
-    rm /tmp/user-data
-}
-
-# 函数：临时启动虚拟机以应用 CloudInit 配置
-apply_cloudinit() {
-    local vmid=$1
-    echo "临时启动虚拟机以应用 CloudInit 配置..."
-    qm start $vmid
-    if [ $? -ne 0 ]; then
-        echo "启动虚拟机失败：VMID $vmid"
-        exit 1
-    fi
-
-    # 等待 CloudInit 完成（60秒）
-    echo "等待 60 秒以确保 CloudInit 配置完成..."
-    sleep 60
-
-    # 停止虚拟机
-    echo "停止虚拟机..."
-    qm stop $vmid
-    if [ $? -ne 0 ]; then
-        echo "停止虚拟机失败：VMID $vmid"
-        exit 1
-    fi
 }
 
 # 函数：将虚拟机转换为模板
@@ -373,26 +288,26 @@ convert_to_template() {
         echo "转换为模板失败：VMID $vmid"
         exit 1
     fi
-
-    # 清理 CloudInit 用户数据文件
-    rm /var/lib/vz/snippets/user-data-$vmid.yml
 }
 
-# 函数：创建单个模板
-create_template() {
-    local distro_option=$1
-    local vmid=$2
-    local vmbr=$3
-    local storage=$4
+# 主函数
+main() {
+    # 如果提供了参数（发行版选项和 VMID），则使用参数运行
+    if [ $# -eq 2 ]; then
+        set_distro_and_vmid "$1" "$2"
+    else
+        # 否则进入交互模式
+        show_distro_menu
+    fi
 
-    # 设置发行版信息
-    set_distro_info $distro_option $vmid
+    # 提示用户输入网络接口和存储
+    prompt_for_network_and_storage
 
     # 检查并销毁已存在的虚拟机
     destroy_existing_vm $vmid
 
-    # 下载并验证镜像
-    download_and_verify_image $image_url $image_file $sha256_url
+    # 下载镜像
+    download_image $image_url $image_file
 
     # 创建虚拟机
     create_vm $vmid $vm_name $vmbr
@@ -400,11 +315,8 @@ create_template() {
     # 导入磁盘
     import_disk $vmid $image_file $storage
 
-    # 配置 CloudInit 并注入用户数据
-    configure_cloudinit $vmid $storage $package_manager
-
-    # 临时启动虚拟机以应用 CloudInit 配置
-    apply_cloudinit $vmid
+    # 配置虚拟机
+    configure_vm $vmid $storage
 
     # 转换为模板
     convert_to_template $vmid
@@ -417,59 +329,5 @@ create_template() {
     echo "====================================="
 }
 
-# 函数：自动创建所有模板
-create_all_templates() {
-    local start_vmid=8000
-    local distro_count=10  # 总共有 10 个发行版
-    local current_vmid=$start_vmid
-
-    # 发行版名称（仅用于显示）
-    declare -A distro_names
-    distro_names[1]="Debian 12"
-    distro_names[2]="Debian 11"
-    distro_names[3]="CentOS 9 Stream"
-    distro_names[4]="CentOS 8 Stream"
-    distro_names[5]="Ubuntu 22.04"
-    distro_names[6]="Ubuntu 24.04"
-    distro_names[7]="AlmaLinux 8"
-    distro_names[8]="AlmaLinux 9"
-    distro_names[9]="Rocky Linux 8"
-    distro_names[10]="Rocky Linux 9"
-
-    for distro_option in $(seq 1 $distro_count); do
-        echo "====================================="
-        echo "正在为 ${distro_names[$distro_option]} 创建模板，VMID: $current_vmid"
-        echo "====================================="
-
-        # 创建模板
-        create_template $distro_option $current_vmid $vmbr $storage
-
-        # VMID 递增
-        current_vmid=$((current_vmid + 1))
-    done
-}
-
-# 主函数
-main() {
-    echo "====================================="
-    echo "开始一键安装所有 Proxmox VE 模板"
-    echo "VMID 将从 8000 开始递增"
-    echo "====================================="
-
-    # 提示用户选择网络接口
-    prompt_for_network
-
-    # 提示用户选择存储
-    prompt_for_storage
-
-    # 创建所有模板
-    create_all_templates
-
-    echo "====================================="
-    echo "所有模板创建完成！"
-    echo "创建的模板 VMID 范围：8000 - $((8000 + 10 - 1))"
-    echo "====================================="
-}
-
 # 运行主函数
-main
+main "$@"
