@@ -34,6 +34,31 @@ echo -e "${BLUE}      仓库: github.com/Tiancaizhi9098/Proxmox-VE-OS-Template${
 echo -e "${BLUE}====================================================${NC}"
 echo
 
+# 检查依赖
+function check_dependencies() {
+    local deps=("wget" "qm" "pvesm")
+    local missing=()
+    
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        print_error "缺少以下依赖工具:"
+        for tool in "${missing[@]}"; do
+            echo -e "  - ${RED}$tool${NC}"
+        done
+        echo
+        print_error "请安装缺失的依赖后再运行脚本."
+        exit 1
+    fi
+}
+
+# 运行依赖检查
+check_dependencies
+
 # 全局变量
 VM_ID=""
 STORAGE=""
@@ -51,7 +76,7 @@ function get_available_storages() {
 }
 
 function get_available_bridges() {
-    ip link show | grep -E '^[0-9]+: (vmbr[0-9]+|eth[0-9]+|ens[0-9]+)' | awk -F ': ' '{print $2}' | cut -d '@' -f 1
+    ip link show | grep -E '^[0-9]+: (vmbr[0-9]+|eth[0-9]+|ens[0-9]+|br[0-9]+|bond[0-9]+)' | awk -F ': ' '{print $2}' | cut -d '@' -f 1
 }
 
 function print_status() {
@@ -146,8 +171,17 @@ function select_storage() {
     local storages=($(get_available_storages))
     
     if [ ${#storages[@]} -eq 0 ]; then
-        print_error "未找到可用的存储!"
-        exit 1
+        print_error "未找到可用的存储! 将允许手动输入。"
+        echo
+        read -p "请手动输入存储名称(例如: local-lvm, local-zfs): " STORAGE
+        
+        # 验证存储是否存在
+        if ! pvesm status | grep -q "$STORAGE"; then
+            print_error "警告: 无法验证存储 '$STORAGE' 是否存在，将尝试继续..."
+        else
+            print_success "已选择存储: $STORAGE"
+        fi
+        return
     fi
     
     local i=1
@@ -174,8 +208,17 @@ function select_network_bridge() {
     local bridges=($(get_available_bridges))
     
     if [ ${#bridges[@]} -eq 0 ]; then
-        print_error "未找到可用的网络接口!"
-        exit 1
+        print_error "未找到可用的网络接口! 将允许手动输入。"
+        echo
+        read -p "请手动输入网络接口名称(例如: vmbr0, eth0): " NETWORK_BRIDGE
+        
+        # 验证网络接口是否存在
+        if ! ip link show | grep -q "$NETWORK_BRIDGE"; then
+            print_error "警告: 无法验证网络接口 '$NETWORK_BRIDGE' 是否存在，将尝试继续..."
+        else
+            print_success "已选择网络接口: $NETWORK_BRIDGE"
+        fi
+        return
     fi
     
     local i=1
@@ -193,6 +236,45 @@ function select_network_bridge() {
     fi
     
     NETWORK_BRIDGE=${bridges[$bridge_choice-1]}
+}
+
+# 自定义VM配置
+function customize_vm_resources() {
+    echo
+    echo -e "${YELLOW}VM资源配置:${NC}"
+    echo -e "当前配置:"
+    echo -e "  磁盘大小: ${GREEN}$DISK_SIZE${NC}"
+    echo -e "  内存: ${GREEN}$MEMORY MB${NC}"
+    echo -e "  CPU核心数: ${GREEN}$CORES${NC}"
+    echo
+    
+    if confirm_action "是否自定义这些设置"; then
+        # 自定义磁盘大小
+        read -p "请输入磁盘大小(例如:8G, 16G, 32G): " custom_disk
+        if [[ -n "$custom_disk" ]]; then
+            DISK_SIZE="$custom_disk"
+        fi
+        
+        # 自定义内存
+        read -p "请输入内存大小(MB)(例如:1024, 2048, 4096): " custom_memory
+        if [[ -n "$custom_memory" && "$custom_memory" =~ ^[0-9]+$ ]]; then
+            MEMORY="$custom_memory"
+        else
+            print_error "无效的内存大小，将保持默认值 $MEMORY MB."
+        fi
+        
+        # 自定义CPU核心数
+        read -p "请输入CPU核心数(例如:1, 2, 4): " custom_cores
+        if [[ -n "$custom_cores" && "$custom_cores" =~ ^[0-9]+$ && "$custom_cores" -gt 0 ]]; then
+            CORES="$custom_cores"
+        else
+            print_error "无效的CPU核心数，将保持默认值 $CORES."
+        fi
+        
+        print_success "已更新VM资源配置!"
+    else
+        print_status "保留默认资源配置"
+    fi
 }
 
 # 下载云镜像
@@ -310,6 +392,9 @@ function main() {
     
     # 选择网络接口
     select_network_bridge
+    
+    # 自定义VM资源
+    customize_vm_resources
     
     # 显示摘要
     if ! display_summary; then
