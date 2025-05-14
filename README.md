@@ -18,6 +18,9 @@ This is a script for automatically creating Cloud-Init template virtual machines
 - 选择存储目标和网络接口
 - 开启Root和密码登录
 - 一键转换为模板
+- 自定义虚拟机资源配置(磁盘大小、内存、CPU核心数)
+- 支持手动输入存储和网络接口(当自动检测失败时)
+- 自动检测依赖工具
 
 ## 支持的系统 | Supported Systems
 
@@ -65,8 +68,9 @@ chmod +x create_pve_template.sh
 2. 输入VMID (范围1000-9999)
 3. 选择存储位置
 4. 选择网络接口
-5. 确认配置信息
-6. 等待脚本自动完成剩余操作
+5. 自定义虚拟机资源(可选)
+6. 确认配置信息
+7. 等待脚本自动完成剩余操作
 
 ## 从模板创建VM | Create VM from Template
 
