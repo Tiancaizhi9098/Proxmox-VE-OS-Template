@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Debian](https://img.shields.io/badge/Debian-11%7C12-red)](https://www.debian.org/)
-[![Proxmox](https://img.shields.io/badge/Proxmox-7.x-orange)](https://www.proxmox.com/)
+[![Proxmox](https://img.shields.io/badge/Proxmox-8.x-orange)](https://www.proxmox.com/)
 
 这是一个用于 Proxmox VE 的 Cloud-Init 模板虚拟机快速创建工具，支持自动下载官方 Debian Cloud 镜像并生成可立即使用的模板。
 
@@ -18,31 +18,34 @@
 
 ## 📋 系统要求
 
-- Proxmox VE 7.x 或更高版本
+- Proxmox VE 8.x
 - 运行脚本需要 root 权限
 - 需要联网环境以下载系统镜像
+- `jq` 工具 (用于解析 JSON)
 
 ## 💻 一键安装使用
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/install.sh)
+bash <(curl -s https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/pve_template_creator.sh)
 ```
 
 ## 🛠️ 使用步骤
 
 1. **选择 Debian 版本**：目前支持 Debian 11 (Bullseye) 和 Debian 12 (Bookworm)
-2. **选择存储位置**：选择您想要存储模板的存储位置
-3. **选择网络桥接**：选择您的虚拟机将使用的网络桥接接口
-4. **设置 VMID**：输入自定义的 VMID（默认为 8000）
-5. **等待创建完成**：脚本会自动下载镜像并完成配置
+2. **设置 VMID**：输入自定义的 VMID（例如：8000）
+3. **选择存储位置**：选择您想要存储模板的存储位置（如 local、local-lvm 等）
+4. **选择网络桥接**：选择您的虚拟机将使用的网络桥接接口（如 vmbr0）
+5. **设置 CPU、内存和磁盘**：配置虚拟机的硬件参数
+6. **设置 root 密码**：为模板设置 root 用户密码
+7. **等待创建完成**：脚本会自动下载镜像并完成配置
 
 ## 🔑 模板信息
 
 创建完成的模板信息：
 
 - **用户名**：`root`
-- **密码**：`proxmox`
-- **默认 SSH 公钥**：使用宿主机 root 用户的 SSH 公钥（如果存在）
+- **密码**：您在创建过程中设置的密码
+- **SSH 公钥**：使用宿主机 root 用户的 SSH 公钥（如果存在）
 
 ## 📝 后续使用
 
@@ -58,11 +61,11 @@ qm clone <模板VMID> <新VMID> --name <新虚拟机名称>
 qm clone 8000 101 --name web-server
 ```
 
-> **安全提示**：请记得在首次使用克隆的虚拟机时修改默认密码！
+> **安全提示**：请记得在首次使用克隆的虚拟机时审查安全设置！
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详情请查看 [LICENSE](LICENSE) 文件
+本项目采用 MIT 许可证
 
 ## 🤝 贡献
 
