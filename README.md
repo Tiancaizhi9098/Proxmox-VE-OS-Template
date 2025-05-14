@@ -1,89 +1,73 @@
-# Proxmox VE OS Template
+# Proxmox VE OS Template 创建工具
 
-[![GitHub issues](https://img.shields.io/github/issues/Tiancaizhi9098/Proxmox-VE-OS-Template)](https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template/issues)
-[![GitHub license](https://img.shields.io/github/license/Tiancaizhi9098/Proxmox-VE-OS-Template)](https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Debian](https://img.shields.io/badge/Debian-11%7C12-red)](https://www.debian.org/)
+[![Proxmox](https://img.shields.io/badge/Proxmox-7.x-orange)](https://www.proxmox.com/)
 
-## 简介 | Introduction
+这是一个用于 Proxmox VE 的 Cloud-Init 模板虚拟机快速创建工具，支持自动下载官方 Debian Cloud 镜像并生成可立即使用的模板。
 
-这是一个用于在Proxmox VE上自动创建Cloud-Init模板虚拟机的脚本。脚本提供交互式菜单，支持多种操作系统，自动完成镜像下载、虚拟机创建、磁盘导入及模板转换等操作。
+## 🚀 功能特点
 
-This is a script for automatically creating Cloud-Init template virtual machines on Proxmox VE. The script provides an interactive menu, supports multiple operating systems, and automatically completes image download, virtual machine creation, disk import, and template conversion.
+- 🔄 **交互式菜单设计**：通过简单的交互式菜单选择所需系统版本和设置
+- 📦 **自动下载镜像**：支持自动下载 Debian 11/12 Cloud-Init 官方镜像
+- 🔧 **全自动配置**：自动化完成从镜像导入到模板创建的全过程
+- 🔍 **智能检测**：检测已存在的 VMID 并提供处理选项
+- 🌉 **网络自动配置**：智能检测并选择可用的网络桥接接口
+- 💾 **存储灵活选择**：支持选择不同的存储目标位置
+- 🔒 **安全设置**：默认启用 root 用户及密码登录
 
-## 功能 | Features
+## 📋 系统要求
 
-- 通过交互式菜单选择操作系统版本
-- 自动下载最新的Cloud镜像
-- 自定义虚拟机ID (VMID)
-- 自动检测并销毁同名VM (需确认)
-- 选择存储目标和网络接口
-- 开启Root和密码登录
-- 一键转换为模板
-- 自定义虚拟机资源配置(磁盘大小、内存、CPU核心数)
-- 支持手动输入存储和网络接口(当自动检测失败时)
-- 自动检测依赖工具
+- Proxmox VE 7.x 或更高版本
+- 运行脚本需要 root 权限
+- 需要联网环境以下载系统镜像
 
-## 支持的系统 | Supported Systems
-
-- Debian 12 (Bookworm)
-- Debian 11 (Bullseye)
-- 更多系统将陆续添加...
-
-## 一键安装与使用 | One-click Install and Use
-
-在Proxmox VE节点上执行以下命令：
+## 💻 一键安装使用
 
 ```bash
-wget -O /usr/local/bin/create_pve_template.sh https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create_pve_template.sh && chmod +x /usr/local/bin/create_pve_template.sh && create_pve_template.sh
+bash <(curl -s https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/install.sh)
 ```
 
-## 手动安装 | Manual Installation
+## 🛠️ 使用步骤
 
-1. 克隆仓库:
+1. **选择 Debian 版本**：目前支持 Debian 11 (Bullseye) 和 Debian 12 (Bookworm)
+2. **选择存储位置**：选择您想要存储模板的存储位置
+3. **选择网络桥接**：选择您的虚拟机将使用的网络桥接接口
+4. **设置 VMID**：输入自定义的 VMID（默认为 8000）
+5. **等待创建完成**：脚本会自动下载镜像并完成配置
+
+## 🔑 模板信息
+
+创建完成的模板信息：
+
+- **用户名**：`root`
+- **密码**：`proxmox`
+- **默认 SSH 公钥**：使用宿主机 root 用户的 SSH 公钥（如果存在）
+
+## 📝 后续使用
+
+模板创建完成后，您可以通过以下方式从模板克隆新的虚拟机：
 
 ```bash
-git clone https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template.git
+qm clone <模板VMID> <新VMID> --name <新虚拟机名称>
 ```
 
-2. 进入目录:
+例如：
 
 ```bash
-cd Proxmox-VE-OS-Template
+qm clone 8000 101 --name web-server
 ```
 
-3. 添加执行权限:
+> **安全提示**：请记得在首次使用克隆的虚拟机时修改默认密码！
 
-```bash
-chmod +x create_pve_template.sh
-```
+## 📄 许可证
 
-4. 运行脚本:
+本项目采用 MIT 许可证 - 详情请查看 [LICENSE](LICENSE) 文件
 
-```bash
-./create_pve_template.sh
-```
+## 🤝 贡献
 
-## 使用说明 | Usage
+欢迎提交 Issue 或 Pull Request 来完善此项目！
 
-1. 运行脚本后，按照提示选择所需的操作系统版本
-2. 输入VMID (范围1000-9999)
-3. 选择存储位置
-4. 选择网络接口
-5. 自定义虚拟机资源(可选)
-6. 确认配置信息
-7. 等待脚本自动完成剩余操作
+---
 
-## 从模板创建VM | Create VM from Template
-
-模板创建完成后，可以使用以下命令从模板克隆创建新的VM:
-
-```bash
-qm clone <template_id> <new_vmid> --name <vm_name>
-```
-
-## 贡献 | Contributing
-
-欢迎提交Pull Request或创建Issue来帮助改进此项目。
-
-## 许可证 | License
-
-本项目采用MIT许可证。详情请参阅[LICENSE](LICENSE)文件。 
+如有任何问题或建议，请在 [GitHub Issues](https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template/issues) 提出 
