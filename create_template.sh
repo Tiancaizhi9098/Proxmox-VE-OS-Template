@@ -187,9 +187,15 @@ select_network() {
     BRIDGES=$(ip link show type bridge | grep -o "vmbr[0-9]*")
     
     if [ -z "$BRIDGES" ]; then
-        warning_msg "未找到标准的 vmbr 网桥，将使用 vmbr0"
-        BRIDGE="vmbr0"
-    else
+        # 尝试其他方法获取网桥
+        BRIDGES=$(grep -l 'TYPE="Bridge"' /etc/network/interfaces.d/* /etc/network/interfaces 2>/dev/null | xargs grep -o "vmbr[0-9]*" 2>/dev/null || echo "vmbr0")
+        
+        if [ -z "$BRIDGES" ]; then
+            warning_msg "未找到标准的 vmbr 网桥，将使用 vmbr0"
+            BRIDGE="vmbr0"
+            return
+        fi
+    fi
         echo "可用的网桥:"
         count=1
         declare -a BRIDGE_ARRAY
@@ -257,13 +263,45 @@ create_vm() {
     
     # 导入磁盘
     info_msg "正在导入磁盘镜像..."
-    qm importdisk $VMID "$TEMP_DIR/$IMAGE_FILENAME" $STORAGE || error_exit "导入磁盘失败"
+    
+    if [ "$DISK_FORMAT" = "qcow2" ]; then
+        qm importdisk $VMID "$TEMP_DIR/$IMAGE_FILENAME" $STORAGE --format $DISK_FORMAT || error_exit "导入磁盘失败"
+    else
+        qm importdisk $VMID "$TEMP_DIR/$IMAGE_FILENAME" $STORAGE || error_exit "导入磁盘失败"
+    fi
+    
+    # 获取导入的磁盘 ID
+    info_msg "正在获取磁盘 ID..."
+    sleep 2  # 等待导入完成
+    
+    # 尝试多种方式获取磁盘ID
+    DISK_PATH=$(find /var/lib/vz/images/$VMID -type f -name "vm-$VMID-disk-*" 2>/dev/null | head -1)
+    
+    if [ -n "$DISK_PATH" ]; then
+        DISK_NUM=$(echo "$DISK_PATH" | grep -o "disk-[0-9]*" | cut -d- -f2)
+        DISK_NAME="$STORAGE:$VMID/vm-$VMID-disk-$DISK_NUM"
+        info_msg "通过路径找到磁盘: $DISK_NAME"
+    else
+        # 尝试通过pvesm获取
+        DISK_NAME=$(qm config $VMID | grep -o "$STORAGE:.*" | head -1 | tr -d ',')
+        
+        if [ -z "$DISK_NAME" ]; then
+            # 默认方式
+            DISK_NAME="$STORAGE:$VMID/vm-$VMID-disk-0"
+            warning_msg "未能自动检测磁盘 ID，使用默认值: $DISK_NAME"
+        else
+            info_msg "通过配置找到磁盘: $DISK_NAME"
+        fi
+    fi
     
     # 配置磁盘
-    qm set $VMID --scsihw virtio-scsi-pci --scsi0 $STORAGE:vm-$VMID-disk-0 || error_exit "配置磁盘失败"
+    qm set $VMID --scsihw virtio-scsi-pci --scsi0 $DISK_NAME || error_exit "配置磁盘失败"
     
     # 添加 Cloud-Init 驱动器
-    qm set $VMID --ide2 $STORAGE:cloudinit || error_exit "添加 Cloud-Init 驱动器失败"
+    qm set $VMID --ide2 $STORAGE:cloudinit || {
+        warning_msg "标准 Cloud-Init 驱动器添加失败，尝试替代方法..."
+        qm set $VMID --ide2 $STORAGE:0,media=cdrom,format=raw || error_exit "添加 Cloud-Init 驱动器失败"
+    }
     
     # 设置引导顺序
     qm set $VMID --boot c --bootdisk scsi0 || error_exit "设置引导顺序失败"
@@ -271,22 +309,20 @@ create_vm() {
     # 配置串口
     qm set $VMID --serial0 socket --vga serial0 || error_exit "配置串口失败"
     
+    # 创建自定义配置文件
+    mkdir -p /var/lib/vz/snippets/
+    
+    cat > "/var/lib/vz/snippets/99-pve.cfg" << EOF
+#cloud-config
+ssh_pwauth: true
+EOF
+    
     # 配置 Cloud-Init
     qm set $VMID --ciuser root || error_exit "设置 Cloud-Init 用户失败"
     qm set $VMID --cipassword "ChangeMe2024!" || error_exit "设置 Cloud-Init 密码失败"
     
     # 启用 SSH 密码认证
-    cat > "$TEMP_DIR/99-pve.cfg" << EOF
-#cloud-config
-ssh_pwauth: true
-EOF
-    
-    qm set $VMID --cicustom "user=local:snippets/99-pve.cfg" || {
-        info_msg "尝试创建自定义配置目录..."
-        mkdir -p /var/lib/vz/snippets/
-        cp "$TEMP_DIR/99-pve.cfg" /var/lib/vz/snippets/
-        qm set $VMID --cicustom "user=local:snippets/99-pve.cfg" || warning_msg "设置 SSH 密码验证失败，请手动配置"
-    }
+    qm set $VMID --cicustom "user=local:snippets/99-pve.cfg" || warning_msg "设置 SSH 密码验证失败，请手动配置"
     
     success_msg "虚拟机创建成功 (VMID: $VMID)"
 }
@@ -318,6 +354,29 @@ cleanup() {
     success_msg "清理完成"
 }
 
+# 检测存储类型并调整导入方法
+detect_storage_type() {
+    # 获取存储类型
+    STORAGE_TYPE=$(pvesm status -storage $STORAGE | tail -n1 | awk '{print $2}')
+    info_msg "存储 $STORAGE 类型: $STORAGE_TYPE"
+    
+    # 根据存储类型设置磁盘格式
+    case $STORAGE_TYPE in
+        dir|nfs|cifs)
+            DISK_FORMAT="qcow2"
+            ;;
+        lvmthin|lvm|zfspool|rbd)
+            DISK_FORMAT="raw"
+            ;;
+        *)
+            DISK_FORMAT="qcow2"
+            warning_msg "未知存储类型 $STORAGE_TYPE，默认使用 qcow2 格式"
+            ;;
+    esac
+    
+    info_msg "磁盘将使用 $DISK_FORMAT 格式"
+}
+
 # 主函数
 main() {
     display_banner
@@ -326,6 +385,7 @@ main() {
     select_os
     input_vmid
     select_storage
+    detect_storage_type
     select_network
     download_image
     create_vm
