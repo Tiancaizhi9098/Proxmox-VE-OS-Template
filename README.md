@@ -1,59 +1,93 @@
-# 🚀 Proxmox VE Cloud-Init 模板创建工具  
-**一键生成支持 Cloud-Init 的虚拟机模板，支持多发行版快速部署！**
-**支持WHMCS系统对接Proxmox使用**
+# Proxmox-VE-OS-Template
 
+基于 Cloud-Init 的 Proxmox VE 操作系统模板生成工具
 
-## 📖 功能特性  
-- **自动化流程**：通过交互式菜单选择系统版本，自动完成镜像下载、虚拟机创建、磁盘导入及模板转换  
-- **Cloud-Init 集成**：预配置云初始化功能
-- **一键脚本**：无需手动配置，通过单行命令快速部署  
+## 简介
 
+这个脚本用于在 Proxmox VE 上自动创建基于 Cloud-Init 的操作系统模板。目前支持 Debian 11 和 Debian 12，后续会添加更多系统支持。
 
-## 🛠️ 安装与运行  
-### 前置条件  
-- 已部署 Proxmox VE 环境（建议版本 ≥ 7.0）  
-- 具备 root 权限或 `qm` 命令执行权限  
-- 网络连通性（用于下载系统镜像）  
+## 功能
 
-### 一键部署  
-```bash  
-bash -c "$(wget -qO- https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create-templates.sh)"
+- 交互式菜单选择系统版本
+- 自动下载最新的云镜像
+- 自定义虚拟机 ID
+- 自动检测并删除同名虚拟机（需确认）
+- 自定义存储位置
+- 自定义网络接口
+- 自动配置 Cloud-Init（启用 root 登录和密码认证）
+- 转换为模板（可选）
+
+## 一键安装使用
+
+```bash
+wget -O /usr/local/bin/create_template.sh https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create_template.sh && chmod +x /usr/local/bin/create_template.sh && create_template.sh
 ```
-### 一键部署全部模版  
-```bash  
-wget -O install-all-templates.sh https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/refs/heads/main/install-all-templates.sh && chmod +x install-all-templates.sh && ./install-all-templates.sh  
-```  
 
+或者：
 
-## 🚀 使用指南  
-1. **选择发行版**：根据菜单提示输入对应数字（1-10）  
-2. **输入 VMID**：自定义虚拟机 ID（例如：8000，需确保未被占用）  
-3. **自动处理**：脚本将检测并销毁同名 VM（如需）、下载镜像、创建虚拟机、配置 Cloud-Init 并转换为模板  
+```bash
+curl -s https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create_template.sh -o /usr/local/bin/create_template.sh && chmod +x /usr/local/bin/create_template.sh && create_template.sh
+```
 
+## 手动安装
 
-## 📜 支持的发行版  
-1. Debian 12
-2. Debian 11
-3. CentOS 9 Stream
-4. CentOS 8 Stream
-5. Ubuntu 24.04
-6. Ubuntu 22.04
-7. AlmaLinux 9
-8. AlmaLinux 8
-9. Rocky Linux 9
-10. Rocky Linux 8
+1. 克隆仓库：
 
-## ⚠️ 注意事项  
-1. **VMID 唯一性**：请确保输入的 VMID 未被占用，脚本会提示销毁已存在的同名 VM（需手动确认）  
-2. **镜像大小**：部分系统镜像较大（约 1-2GB），下载时间取决于网络速度  
-3. **存储位置**：镜像默认导入到 Proxmox 的 `local` 存储，如需更改请修改脚本中的存储名称（如 `local-lvm`）  
-4. **模板使用**：创建完成后，可在 Proxmox 网页端 **模板** 列表中找到对应条目，通过“克隆”快速生成新虚拟机  
+```bash
+git clone https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template.git
+```
 
+2. 进入目录：
 
-## 🤝 贡献与反馈  
-- 欢迎提交 [Issue](https://github.com/Tiancaizhi9098/Proxmox-VE-OS-Template/issues) 反馈问题或建议  
-- 如需新增发行版支持，可通过 Pull Request 提交镜像链接及配置参数  
+```bash
+cd Proxmox-VE-OS-Template
+```
 
+3. 添加执行权限：
 
-## 📄 许可证  
-本项目采用 **MIT 许可证**，详见 [LICENSE](LICENSE) 文件。  
+```bash
+chmod +x create_template.sh
+```
+
+4. 运行脚本：
+
+```bash
+./create_template.sh
+```
+
+## 使用说明
+
+1. 选择要创建的操作系统模板（Debian 11 或 Debian 12）
+2. 输入虚拟机 ID（推荐 8000+）
+3. 选择存储位置
+4. 选择网络接口
+5. 等待脚本自动完成下载、配置和创建过程
+6. 选择是否将虚拟机转换为模板
+
+## 默认设置
+
+- **内存**：2GB
+- **CPU 核心数**：2核
+- **用户名**：root
+- **密码**：ChangeMe2024!
+- **SSH**：已启用密码认证
+
+## 注意事项
+
+- 脚本需要在 Proxmox VE 宿主机上以 root 权限运行
+- 确保宿主机可以访问互联网以下载镜像
+- 创建模板后，请通过克隆方式使用，而不是直接使用模板
+
+## 后续工作
+
+- 添加更多操作系统支持（Ubuntu, CentOS, Rocky Linux 等）
+- 添加更多自定义选项（CPU, 内存, 磁盘大小等）
+- 添加更多网络配置选项
+
+## 贡献
+
+欢迎通过 Issue 和 Pull Request 来完善这个项目。
+
+## 许可
+
+MIT 许可证
