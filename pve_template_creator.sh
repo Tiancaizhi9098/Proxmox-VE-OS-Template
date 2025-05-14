@@ -160,18 +160,27 @@ qm create $vmid --name "$vm_name" --memory $memory --cores $cores --net0 "virtio
 
 # 导入磁盘
 echo "正在导入磁盘..."
-qm importdisk $vmid "/var/lib/vz/template/iso/$image_name" $storage || error_exit "导入磁盘失败"
-
-# 查找导入的磁盘名称
-disk_name=$(qm config $vmid | grep -E "unused[0-9]+:" | head -1 | awk '{print $1}' | sed 's/://')
-if [ -z "$disk_name" ]; then
-    error_exit "无法找到导入的磁盘"
+import_result=$(qm importdisk $vmid "/var/lib/vz/template/iso/$image_name" $storage)
+if [ $? -ne 0 ]; then
+    error_exit "导入磁盘失败: $import_result"
 fi
+
+# 显示导入结果
+echo "$import_result"
+
+# 等待导入完成
+sleep 2
 
 # 配置虚拟机
 echo "正在配置虚拟机..."
 qm set $vmid --scsihw virtio-scsi-pci || error_exit "设置SCSI硬件失败"
-qm set $vmid --$disk_name scsi0 || error_exit "附加磁盘失败"
+
+# 附加磁盘 - 直接使用存储:vm-VMID-disk-0 格式
+disk_path="$storage:vm-$vmid-disk-0"
+echo "正在附加磁盘: $disk_path"
+qm set $vmid --scsi0 "$disk_path" || error_exit "附加磁盘失败"
+
+# 设置引导和其他选项
 qm set $vmid --boot c --bootdisk scsi0 || error_exit "设置启动盘失败"
 qm set $vmid --ide2 $storage:cloudinit || error_exit "添加Cloud-Init设备失败"
 qm set $vmid --serial0 socket --vga serial0 || error_exit "设置串口失败"
