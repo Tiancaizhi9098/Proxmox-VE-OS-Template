@@ -47,7 +47,7 @@ IMAGE_URL=""
 
 # 获取可用的存储和网络接口
 function get_available_storages() {
-    pvesm status | grep -E 'active' | awk '{print $1}' | grep -v local
+    pvesm status | grep -E 'active' | awk '{print $1}'
 }
 
 function get_available_bridges() {
