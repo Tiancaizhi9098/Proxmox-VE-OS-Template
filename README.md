@@ -17,7 +17,7 @@
 
 ### 一键部署  
 ```bash  
-bash -c "$(wget -qO- https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/install.sh)"
+bash -c "$(wget -qO- https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create-templates.sh)"
 ```
 ### 一键部署全部模版  
 ```bash  
