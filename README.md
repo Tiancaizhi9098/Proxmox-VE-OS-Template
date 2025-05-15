@@ -1,7 +1,5 @@
 # Proxmox VE OS Template - 云镜像定制与PVE模板创建工具
 
-![logo](https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/resources/logo.png)
-
 ## 📋 项目介绍
 
 这是一个用于在Proxmox VE上自动下载、定制和创建多种Linux发行版云镜像模板的工具。通过本工具，您可以轻松创建支持Cloud-Init的虚拟机模板，并自动配置root登录、软件预装等功能。
