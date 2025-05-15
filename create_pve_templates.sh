@@ -81,9 +81,11 @@ function check_dependencies() {
         apt install -y cloud-init
         
         if ! command -v cloud-localds &> /dev/null; then
-            echo -e "${RED}错误: 无法安装cloud-init，请手动安装后再试${NC}"
-            exit 1
+            echo -e "${YELLOW}警告: cloud-init已安装但cloud-localds命令不可用。继续执行...${NC}"
+            # 不再退出，而是继续执行
         fi
+    else
+        echo -e "${GREEN}cloud-init工具已安装${NC}"
     fi
     
     # 检查基本工具
@@ -501,9 +503,10 @@ function main_menu() {
     echo "6) Ubuntu 24.04"
     echo "7) Ubuntu 22.04"
     echo "8) Ubuntu 20.04"
+    echo "9) 一次性安装所有镜像"
     echo "0) 退出"
     
-    read -p "请输入选项 [0-8]: " choice
+    read -p "请输入选项 [0-9]: " choice
     
     # 获取可用存储和虚拟机ID
     function get_storage_and_vmid() {
@@ -628,6 +631,35 @@ function main_menu() {
         6) handle_image_creation "ubuntu" "24.04" "9014" ;;
         7) handle_image_creation "ubuntu" "22.04" "9015" ;;
         8) handle_image_creation "ubuntu" "20.04" "9016" ;;
+        9) 
+            show_logo
+            echo -e "${YELLOW}一次性安装所有镜像${NC}"
+            echo -e "${YELLOW}此操作将依次安装所有支持的操作系统镜像，请确保有足够的存储空间${NC}"
+            read -p "确定要继续吗? (y/n): " confirm_all
+            if [ "$confirm_all" == "y" ] || [ "$confirm_all" == "Y" ]; then
+                # 获取存储位置
+                get_storage_and_vmid 9000
+                if [ $? -eq 0 ]; then
+                    storage=$SELECTED_STORAGE
+                    
+                    # 依次创建各个镜像
+                    handle_image_creation "centos" "9-stream" "9000"
+                    handle_image_creation "centos" "8-stream" "9001"
+                    handle_image_creation "debian" "12" "9006"
+                    handle_image_creation "debian" "11" "9007"
+                    handle_image_creation "debian" "10" "9008"
+                    handle_image_creation "ubuntu" "24.04" "9014"
+                    handle_image_creation "ubuntu" "22.04" "9015"
+                    handle_image_creation "ubuntu" "20.04" "9016"
+                    
+                    echo -e "${GREEN}所有镜像安装完成!${NC}"
+                fi
+            else
+                echo -e "${YELLOW}已取消操作${NC}"
+            fi
+            read -p "按任意键继续..."
+            main_menu
+            ;;
         0)
             echo -e "${GREEN}感谢使用，再见!${NC}"
             exit 0
