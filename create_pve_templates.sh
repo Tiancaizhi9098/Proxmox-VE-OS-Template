@@ -123,21 +123,25 @@ function download_image() {
     mkdir -p $download_dir
     
     case "$distro" in
-        "alma")
-            image_url="https://repo.almalinux.org/almalinux/$version/cloud/x86_64/images/AlmaLinux-$version-GenericCloud-latest.x86_64.qcow2"
-            image_file="$download_dir/almalinux-$version-genericcloud-amd64.qcow2"
-            ;;
-        "alpine")
-            image_url="https://dl-cdn.alpinelinux.org/alpine/v${version%.*}/releases/cloud/alpine-virt-$version-x86_64.qcow2"
-            image_file="$download_dir/alpine-$version-virt-amd64.qcow2"
-            ;;
         "centos")
             if [ "$version" = "9-stream" ]; then
                 image_url="https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
                 image_file="$download_dir/centos-9-stream-genericcloud-amd64.qcow2"
+                
+                # 验证URL是否可访问，如果不可访问则尝试备用URL
+                if ! curl --output /dev/null --silent --head --fail "$image_url"; then
+                    echo -e "${YELLOW}主URL不可用，尝试备用URL...${NC}"
+                    image_url="https://mirror.stream.centos.org/9-stream/Cloud/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+                fi
             elif [ "$version" = "8-stream" ]; then
                 image_url="https://cloud.centos.org/centos/8-stream/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
                 image_file="$download_dir/centos-8-stream-genericcloud-amd64.qcow2"
+                
+                # 验证URL是否可访问，如果不可访问则尝试备用URL
+                if ! curl --output /dev/null --silent --head --fail "$image_url"; then
+                    echo -e "${YELLOW}主URL不可用，尝试备用URL...${NC}"
+                    image_url="https://mirror.stream.centos.org/8-stream/Cloud/x86_64/images/CentOS-Stream-GenericCloud-8-latest.x86_64.qcow2"
+                fi
             fi
             ;;
         "debian")
@@ -151,27 +155,6 @@ function download_image() {
                 image_url="https://cloud.debian.org/images/cloud/buster/latest/debian-10-genericcloud-amd64.qcow2"
                 image_file="$download_dir/debian-10-genericcloud-amd64.qcow2"
             fi
-            ;;
-        "fedora")
-            image_url="https://download.fedoraproject.org/pub/fedora/linux/releases/$version/Cloud/x86_64/images/Fedora-Cloud-Base-$version-1.2.x86_64.qcow2"
-            image_file="$download_dir/fedora-$version-cloud-amd64.qcow2"
-            ;;
-        "kali")
-            image_url="https://cdimage.kali.org/kali-$version/kali-linux-$version-cloud-amd64.qcow2"
-            image_file="$download_dir/kali-$version-cloud-amd64.qcow2"
-            ;;
-        "opensuse")
-            if [ "$version" == "leap-15.5" ]; then
-                image_url="https://download.opensuse.org/distribution/leap/15.5/appliances/openSUSE-Leap-15.5-JeOS.x86_64-Cloud.qcow2"
-                image_file="$download_dir/opensuse-leap-15.5-cloud-amd64.qcow2"
-            elif [ "$version" == "tumbleweed" ]; then
-                image_url="https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-JeOS.x86_64-Cloud.qcow2"
-                image_file="$download_dir/opensuse-tumbleweed-cloud-amd64.qcow2"
-            fi
-            ;;
-        "rocky")
-            image_url="https://dl.rockylinux.org/pub/rocky/$version/images/Rocky-$version-GenericCloud.latest.x86_64.qcow2"
-            image_file="$download_dir/rocky-$version-genericcloud-amd64.qcow2"
             ;;
         "ubuntu")
             if [ "$version" == "24.04" ]; then
@@ -276,8 +259,8 @@ function customize_image() {
     
     # 根据不同发行版设置不同的定制命令
     case "$distro" in
-        "alma"|"centos"|"rocky")
-            # 红帽系发行版 - 添加EPEL仓库并安装软件
+        "centos")
+            # CentOS发行版 - 添加EPEL仓库并安装软件
             echo -e "${YELLOW}为${distro}添加EPEL仓库...${NC}"
             
             virt-customize -a "$customized_image" \
@@ -311,6 +294,17 @@ function customize_image() {
                 --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
                 --selinux-relabel || true
                 
+            # 修复CentOS 9 cloud-init问题
+            if [ "$version" = "9-stream" ]; then
+                echo -e "${YELLOW}应用CentOS 9 cloud-init修复...${NC}"
+                virt-customize -a "$customized_image" \
+                    --run-command "echo 'datasource_list: [ NoCloud, ConfigDrive, None ]' > /etc/cloud/cloud.cfg.d/99-pve.cfg" \
+                    --run-command "sed -i 's/name: centos/name: cloud-user/' /etc/cloud/cloud.cfg || true" \
+                    --run-command "dnf reinstall -y cloud-init || true" \
+                    --run-command "systemctl enable cloud-init" \
+                    --selinux-relabel || true
+            fi
+                
             # 设置时区
             echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
             virt-customize -a "$customized_image" \
@@ -325,27 +319,7 @@ function customize_image() {
                 --selinux-relabel || true
             ;;
             
-        "alpine")
-            # Alpine Linux
-            virt-customize -a "$customized_image" \
-                --run-command "apk update" \
-                --run-command "apk add qemu-guest-agent openssh" \
-                --run-command "rc-update add qemu-guest-agent" || customize_result=1
-                
-            # 尝试安装其他工具，但不中断流程
-            virt-customize -a "$customized_image" \
-                --run-command "apk add htop git tree || true" \
-                --run-command "apk add neofetch || wget -O /usr/bin/neofetch https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch && chmod +x /usr/bin/neofetch || true" \
-                --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
-                --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
-                --run-command "setup-timezone -z Asia/Shanghai || true" \
-                --run-command "apk cache clean || true" \
-                --run-command "truncate -s 0 /etc/machine-id || true" || true
-            ;;
-            
-        "debian"|"kali"|"ubuntu")
+        "debian"|"ubuntu")
             # Debian系发行版
             virt-customize -a "$customized_image" \
                 --run-command "apt update" \
@@ -385,83 +359,6 @@ function customize_image() {
                 --run-command "apt clean || true" \
                 --run-command "apt autoclean || true" \
                 --run-command "apt autoremove -y || true" \
-                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" || true
-            ;;
-            
-        "fedora")
-            # Fedora
-            virt-customize -a "$customized_image" \
-                --run-command "dnf -y update" \
-                --install qemu-guest-agent || customize_result=1
-                
-            # 尝试安装其他工具，但不中断流程
-            virt-customize -a "$customized_image" \
-                --install git,tree || true
-            
-            virt-customize -a "$customized_image" \
-                --run-command "dnf -y install htop neofetch || true" \
-                --selinux-relabel || true
-            
-            # 配置SSH
-            echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
-                --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
-                --run-command "systemctl enable qemu-guest-agent" \
-                --selinux-relabel || true
-            
-            # 禁用网络等待服务，避免启动挂起
-            echo -e "${YELLOW}禁用网络等待服务...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
-                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
-                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
-                --selinux-relabel || true
-                
-            # 设置时区
-            echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "timedatectl set-timezone Asia/Shanghai || true" \
-                --selinux-relabel || true
-                
-            # 清理
-            echo -e "${YELLOW}清理系统...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "dnf clean all || true" \
-                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" \
-                --selinux-relabel || true
-            ;;
-            
-        "opensuse")
-            # openSUSE
-            virt-customize -a "$customized_image" \
-                --run-command "zypper --non-interactive refresh" \
-                --run-command "zypper --non-interactive install qemu-guest-agent || true" || customize_result=1
-                
-            # 尝试安装其他工具，但不中断流程
-            virt-customize -a "$customized_image" \
-                --run-command "zypper --non-interactive install htop git tree || true" \
-                --run-command "zypper --non-interactive install neofetch || true" \
-                --run-command "systemctl enable qemu-guest-agent" \
-                --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
-                --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
-                --run-command "timedatectl set-timezone Asia/Shanghai || true" || true
-
-            # 禁用网络等待服务，避免启动挂起
-            echo -e "${YELLOW}禁用网络等待服务...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "systemctl disable NetworkManager-wait-online.service wicked.service || true" \
-                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
-                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" || true
-                
-            # 清理
-            echo -e "${YELLOW}清理系统...${NC}"
-            virt-customize -a "$customized_image" \
-                --run-command "zypper clean || true" \
                 --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" || true
             ;;
             
@@ -555,6 +452,7 @@ function create_template() {
     qm set $vmid --ide2 $storage:cloudinit
     qm set $vmid --serial0 socket --vga serial0
     qm set $vmid --agent enabled=1
+    qm set $vmid --cpu host
     
     # 调整磁盘大小（可选）
     echo -e "${YELLOW}调整磁盘大小为32G...${NC}"
@@ -595,28 +493,17 @@ function main_menu() {
     check_dependencies
     
     echo "请选择要执行的操作:"
-    echo "1)  AlmaLinux 9"
-    echo "2)  AlmaLinux 8"
-    echo "3)  Alpine 3.19"
-    echo "4)  Alpine 3.18"
-    echo "5)  CentOS 9-stream"
-    echo "6)  CentOS 8-stream"
-    echo "7)  Debian 12"
-    echo "8)  Debian 11"
-    echo "9)  Debian 10"
-    echo "10) Fedora 40"
-    echo "11) Fedora 39"
-    echo "12) Kali 2023.4"
-    echo "13) Rocky 9"
-    echo "14) Rocky 8"
-    echo "15) Ubuntu 24.04"
-    echo "16) Ubuntu 22.04"
-    echo "17) Ubuntu 20.04"
-    echo "18) openSUSE Tumbleweed"
-    echo "19) openSUSE Leap 15.5"
-    echo "0)  退出"
+    echo "1) CentOS 9-stream"
+    echo "2) CentOS 8-stream"
+    echo "3) Debian 12"
+    echo "4) Debian 11"
+    echo "5) Debian 10"
+    echo "6) Ubuntu 24.04"
+    echo "7) Ubuntu 22.04"
+    echo "8) Ubuntu 20.04"
+    echo "0) 退出"
     
-    read -p "请输入选项 [0-19]: " choice
+    read -p "请输入选项 [0-8]: " choice
     
     # 获取可用存储和虚拟机ID
     function get_storage_and_vmid() {
@@ -712,7 +599,7 @@ function main_menu() {
             read -p "按任意键继续..."
             main_menu
             return 1
-        }
+        fi
         
         echo -e "${YELLOW}定制后的镜像文件路径: $customized_image${NC}"
         
@@ -733,25 +620,14 @@ function main_menu() {
     }
     
     case $choice in
-        1) handle_image_creation "alma" "9" "9000" ;;
-        2) handle_image_creation "alma" "8" "9001" ;;
-        3) handle_image_creation "alpine" "3.19" "9002" ;;
-        4) handle_image_creation "alpine" "3.18" "9003" ;;
-        5) handle_image_creation "centos" "9-stream" "9004" ;;
-        6) handle_image_creation "centos" "8-stream" "9005" ;;
-        7) handle_image_creation "debian" "12" "9006" ;;
-        8) handle_image_creation "debian" "11" "9007" ;;
-        9) handle_image_creation "debian" "10" "9008" ;;
-        10) handle_image_creation "fedora" "40" "9009" ;;
-        11) handle_image_creation "fedora" "39" "9010" ;;
-        12) handle_image_creation "kali" "2023.4" "9011" ;;
-        13) handle_image_creation "rocky" "9" "9012" ;;
-        14) handle_image_creation "rocky" "8" "9013" ;;
-        15) handle_image_creation "ubuntu" "24.04" "9014" ;;
-        16) handle_image_creation "ubuntu" "22.04" "9015" ;;
-        17) handle_image_creation "ubuntu" "20.04" "9016" ;;
-        18) handle_image_creation "opensuse" "tumbleweed" "9017" ;;
-        19) handle_image_creation "opensuse" "leap-15.5" "9018" ;;
+        1) handle_image_creation "centos" "9-stream" "9000" ;;
+        2) handle_image_creation "centos" "8-stream" "9001" ;;
+        3) handle_image_creation "debian" "12" "9006" ;;
+        4) handle_image_creation "debian" "11" "9007" ;;
+        5) handle_image_creation "debian" "10" "9008" ;;
+        6) handle_image_creation "ubuntu" "24.04" "9014" ;;
+        7) handle_image_creation "ubuntu" "22.04" "9015" ;;
+        8) handle_image_creation "ubuntu" "20.04" "9016" ;;
         0)
             echo -e "${GREEN}感谢使用，再见!${NC}"
             exit 0
