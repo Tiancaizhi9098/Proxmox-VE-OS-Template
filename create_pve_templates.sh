@@ -8,6 +8,10 @@
 # 一键执行命令: bash <(curl -s https://raw.githubusercontent.com/Tiancaizhi9098/Proxmox-VE-OS-Template/main/create_pve_templates.sh)
 # ========================================================
 
+# 设置错误处理
+set -o pipefail
+trap 'echo -e "\n脚本执行出错，退出中..." >&2; exit 1' ERR
+
 # 定义颜色
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -34,6 +38,21 @@ function show_logo() {
     echo ""
 }
 
+# 检查系统兼容性
+function check_system() {
+    echo -e "${BLUE}检查系统兼容性...${NC}"
+    
+    # 检查是否为Proxmox VE
+    if [ ! -f /usr/bin/pveversion ]; then
+        echo -e "${RED}错误: 此脚本只能在Proxmox VE上运行${NC}"
+        exit 1
+    fi
+    
+    # 检查是否有足够的空间
+    available_space=$(df -h /root | awk 'NR==2 {print $4}')
+    echo -e "${GREEN}系统检查通过. 可用空间: $available_space${NC}"
+}
+
 # 检查依赖
 function check_dependencies() {
     # 如果已经检查过，直接返回
@@ -48,6 +67,11 @@ function check_dependencies() {
         echo -e "${YELLOW}安装libguestfs-tools...${NC}"
         apt update
         apt install -y libguestfs-tools
+        
+        if ! command -v virt-customize &> /dev/null; then
+            echo -e "${RED}错误: 无法安装libguestfs-tools，请手动安装后再试${NC}"
+            exit 1
+        fi
     fi
     
     # 检查cloud-init工具
@@ -55,6 +79,18 @@ function check_dependencies() {
         echo -e "${YELLOW}安装cloud-init工具...${NC}"
         apt update
         apt install -y cloud-init
+        
+        if ! command -v cloud-localds &> /dev/null; then
+            echo -e "${RED}错误: 无法安装cloud-init，请手动安装后再试${NC}"
+            exit 1
+        fi
+    fi
+    
+    # 检查基本工具
+    if ! command -v wget &> /dev/null || ! command -v curl &> /dev/null; then
+        echo -e "${YELLOW}安装基本工具...${NC}"
+        apt update
+        apt install -y curl wget file
     fi
     
     echo -e "${GREEN}依赖检查完成${NC}"
@@ -81,6 +117,7 @@ function download_image() {
     local download_dir="/root/qcow"
     local image_file
     local image_url
+    local download_success=0
     
     # 创建下载目录
     mkdir -p $download_dir
@@ -157,26 +194,37 @@ function download_image() {
     # 如果镜像不存在，则下载
     if [ ! -f "$image_file" ]; then
         echo -e "${YELLOW}下载 $distro $version 云镜像...${NC}"
-        wget -O "$image_file" "$image_url"
+        wget -O "$image_file" "$image_url" || curl -L "$image_url" -o "$image_file"
         
         # 检查下载是否成功
-        if [ ! -f "$image_file" ]; then
+        if [ ! -f "$image_file" ] || [ ! -s "$image_file" ]; then
             echo -e "${RED}下载失败，无法获取镜像文件${NC}"
             return 1
         fi
+        download_success=1
     else
         echo -e "${GREEN}镜像已存在，跳过下载${NC}"
     fi
     
-    # 检查文件是否为有效的qcow2文件
-    if ! file "$image_file" | grep -q "QEMU"; then
-        echo -e "${RED}错误：文件不是有效的QEMU映像格式${NC}"
-        return 1
+    # 检查文件是否为有效的镜像文件
+    if ! file "$image_file" | grep -q -i "QEMU\|disk image"; then
+        if [ "$download_success" -eq 1 ]; then
+            echo -e "${RED}错误：下载的文件不是有效的QEMU镜像格式${NC}"
+            # 删除可能损坏的文件
+            rm -f "$image_file"
+            return 1
+        else
+            echo -e "${RED}错误：现有文件不是有效的QEMU镜像格式，将重新下载${NC}"
+            rm -f "$image_file"
+            # 递归调用来重新下载
+            download_image "$distro" "$version"
+            return $?
+        fi
     fi
     
     echo -e "${GREEN}镜像准备完成: $image_file${NC}"
     
-    # 直接返回文件路径，不要使用echo
+    # 保存结果变量而不是echo
     RESULT_IMAGE_FILE="$image_file"
     return 0
 }
@@ -187,6 +235,7 @@ function customize_image() {
     local version=$2
     local image_file=$3
     local customized_image
+    local customize_result=0
     
     # 检查镜像文件是否存在
     if [ ! -f "$image_file" ]; then
@@ -203,11 +252,22 @@ function customize_image() {
     
     # 复制一份镜像用于定制
     echo -e "${YELLOW}复制镜像用于定制...${NC}"
+    rm -f "$customized_image" # 确保目标文件不存在
     cp "$image_file" "$customized_image"
     
     # 检查复制是否成功
     if [ ! -f "$customized_image" ]; then
         echo -e "${RED}错误：无法复制镜像文件${NC}"
+        return 1
+    fi
+    
+    # 检查镜像文件大小
+    original_size=$(stat -c %s "$image_file")
+    copied_size=$(stat -c %s "$customized_image")
+    
+    if [ "$original_size" != "$copied_size" ]; then
+        echo -e "${RED}错误：复制后的镜像文件大小不一致，可能复制不完整${NC}"
+        rm -f "$customized_image" 
         return 1
     fi
     
@@ -219,13 +279,19 @@ function customize_image() {
         "alma"|"centos"|"rocky")
             # 红帽系发行版 - 添加EPEL仓库并安装软件
             echo -e "${YELLOW}为${distro}添加EPEL仓库...${NC}"
+            
             virt-customize -a "$customized_image" \
-                --run-command "dnf -y install epel-release || dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-$(rpm -E %rhel).noarch.rpm" \
-                --run-command "dnf -y update" \
-                --install qemu-guest-agent \
-                --install git,tree \
+                --update \
+                --install 'qemu-guest-agent' \
+                --selinux-relabel || customize_result=1
+                
+            # 尝试安装EPEL和其他工具，但不要因此失败
+            virt-customize -a "$customized_image" \
+                --run-command "dnf -y install epel-release || dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-\$(rpm -E %rhel).noarch.rpm || true" \
+                --run-command "dnf -y update || true" \
+                --run-command "dnf -y install git tree || true" \
                 --run-command "dnf -y install htop neofetch || true" \
-                --selinux-relabel
+                --selinux-relabel || true
             
             # 配置SSH
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -235,45 +301,61 @@ function customize_image() {
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
                 --run-command "systemctl enable qemu-guest-agent" \
-                --selinux-relabel
+                --selinux-relabel || true
+
+            # 禁用网络等待服务，避免启动挂起
+            echo -e "${YELLOW}禁用网络等待服务...${NC}"
+            virt-customize -a "$customized_image" \
+                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
+                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
+                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
+                --selinux-relabel || true
                 
             # 设置时区
             echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
             virt-customize -a "$customized_image" \
                 --run-command "timedatectl set-timezone Asia/Shanghai || true" \
-                --selinux-relabel
+                --selinux-relabel || true
                 
             # 清理
             echo -e "${YELLOW}清理系统...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "dnf clean all || yum clean all" \
+                --run-command "dnf clean all || yum clean all || true" \
                 --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" \
-                --selinux-relabel
+                --selinux-relabel || true
             ;;
             
         "alpine")
             # Alpine Linux
             virt-customize -a "$customized_image" \
-                --run-command "apk update && apk add qemu-guest-agent openssh" \
+                --run-command "apk update" \
+                --run-command "apk add qemu-guest-agent openssh" \
+                --run-command "rc-update add qemu-guest-agent" || customize_result=1
+                
+            # 尝试安装其他工具，但不中断流程
+            virt-customize -a "$customized_image" \
                 --run-command "apk add htop git tree || true" \
-                --run-command "apk add neofetch || wget -O /usr/bin/neofetch https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch && chmod +x /usr/bin/neofetch" \
-                --run-command "rc-update add qemu-guest-agent" \
+                --run-command "apk add neofetch || wget -O /usr/bin/neofetch https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch && chmod +x /usr/bin/neofetch || true" \
                 --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
                 --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
                 --run-command "setup-timezone -z Asia/Shanghai || true" \
                 --run-command "apk cache clean || true" \
-                --run-command "truncate -s 0 /etc/machine-id || true"
+                --run-command "truncate -s 0 /etc/machine-id || true" || true
             ;;
             
         "debian"|"kali"|"ubuntu")
             # Debian系发行版
             virt-customize -a "$customized_image" \
                 --run-command "apt update" \
-                --run-command "apt install -y qemu-guest-agent acpid || true" \
+                --run-command "apt install -y qemu-guest-agent" || customize_result=1
+                
+            # 尝试安装其他工具，但不中断流程
+            virt-customize -a "$customized_image" \
+                --run-command "apt install -y acpid || true" \
                 --run-command "apt install -y htop git tree || true" \
-                --run-command "apt install -y neofetch || true"
+                --run-command "apt install -y neofetch || true" || true
     
             # 配置SSH允许root登录和密码登录
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -281,29 +363,44 @@ function customize_image() {
                 --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
                 --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
-                --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config"
+                --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" || true
+            
+            # 禁用网络等待服务，避免启动挂起
+            echo -e "${YELLOW}配置网络等待服务...${NC}"
+            virt-customize -a "$customized_image" \
+                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
+                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
+                --run-command "if [ -f /etc/netplan/01-netcfg.yaml ]; then mkdir -p /etc/cloud/cloud.cfg.d/ && echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg || true; fi" \
+                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
+                --run-command "mkdir -p /etc/systemd/system/systemd-networkd-wait-online.service.d/ && echo '[Service]\nTimeoutStartSec=2sec' > /etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf || true" || true
             
             # 设置时区
             echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "timedatectl set-timezone Asia/Shanghai || true"
+                --run-command "timedatectl set-timezone Asia/Shanghai || true" || true
                 
             # 清理
             echo -e "${YELLOW}清理系统...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "apt clean" \
-                --run-command "apt autoclean" \
-                --run-command "apt autoremove -y" \
-                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true"
+                --run-command "apt clean || true" \
+                --run-command "apt autoclean || true" \
+                --run-command "apt autoremove -y || true" \
+                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" || true
             ;;
             
         "fedora")
             # Fedora
             virt-customize -a "$customized_image" \
                 --run-command "dnf -y update" \
-                --install qemu-guest-agent,git,tree \
+                --install qemu-guest-agent || customize_result=1
+                
+            # 尝试安装其他工具，但不中断流程
+            virt-customize -a "$customized_image" \
+                --install git,tree || true
+            
+            virt-customize -a "$customized_image" \
                 --run-command "dnf -y install htop neofetch || true" \
-                --selinux-relabel
+                --selinux-relabel || true
             
             # 配置SSH
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -313,27 +410,38 @@ function customize_image() {
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
                 --run-command "systemctl enable qemu-guest-agent" \
-                --selinux-relabel
+                --selinux-relabel || true
+            
+            # 禁用网络等待服务，避免启动挂起
+            echo -e "${YELLOW}禁用网络等待服务...${NC}"
+            virt-customize -a "$customized_image" \
+                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
+                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
+                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
+                --selinux-relabel || true
                 
             # 设置时区
             echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
             virt-customize -a "$customized_image" \
                 --run-command "timedatectl set-timezone Asia/Shanghai || true" \
-                --selinux-relabel
+                --selinux-relabel || true
                 
             # 清理
             echo -e "${YELLOW}清理系统...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "dnf clean all" \
+                --run-command "dnf clean all || true" \
                 --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" \
-                --selinux-relabel
+                --selinux-relabel || true
             ;;
             
         "opensuse")
             # openSUSE
             virt-customize -a "$customized_image" \
                 --run-command "zypper --non-interactive refresh" \
-                --run-command "zypper --non-interactive install qemu-guest-agent || true" \
+                --run-command "zypper --non-interactive install qemu-guest-agent || true" || customize_result=1
+                
+            # 尝试安装其他工具，但不中断流程
+            virt-customize -a "$customized_image" \
                 --run-command "zypper --non-interactive install htop git tree || true" \
                 --run-command "zypper --non-interactive install neofetch || true" \
                 --run-command "systemctl enable qemu-guest-agent" \
@@ -341,9 +449,20 @@ function customize_image() {
                 --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
-                --run-command "timedatectl set-timezone Asia/Shanghai || true" \
+                --run-command "timedatectl set-timezone Asia/Shanghai || true" || true
+
+            # 禁用网络等待服务，避免启动挂起
+            echo -e "${YELLOW}禁用网络等待服务...${NC}"
+            virt-customize -a "$customized_image" \
+                --run-command "systemctl disable NetworkManager-wait-online.service wicked.service || true" \
+                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
+                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" || true
+                
+            # 清理
+            echo -e "${YELLOW}清理系统...${NC}"
+            virt-customize -a "$customized_image" \
                 --run-command "zypper clean || true" \
-                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true"
+                --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" || true
             ;;
             
         *)
@@ -353,8 +472,14 @@ function customize_image() {
     esac
     
     # 检查virt-customize是否成功
-    if [ $? -ne 0 ]; then
-        echo -e "${YELLOW}警告：部分定制可能未完成，但我们会尝试继续...${NC}"
+    if [ "$customize_result" -ne 0 ]; then
+        echo -e "${YELLOW}警告：部分核心定制失败，但我们会尝试继续...${NC}"
+    fi
+    
+    # 检查创建的镜像是否有效
+    if [ ! -f "$customized_image" ] || [ ! -s "$customized_image" ]; then
+        echo -e "${RED}错误：定制后的镜像无效或为空${NC}"
+        return 1
     fi
     
     echo -e "${GREEN}镜像定制完成: $customized_image${NC}"
@@ -457,7 +582,16 @@ function create_template() {
 
 # 主菜单
 function main_menu() {
+    # 清理可能存在的变量
+    unset RESULT_IMAGE_FILE RESULT_CUSTOMIZED_IMAGE SELECTED_STORAGE SELECTED_VMID
+    
+    # 显示logo
     show_logo
+    
+    # 检查系统兼容性
+    check_system
+    
+    # 检查依赖
     check_dependencies
     
     echo "请选择要执行的操作:"
@@ -490,7 +624,20 @@ function main_menu() {
         
         # 获取可用存储
         echo ""
-        available_storages=$(pvesm status | grep -v "Name" | awk '{print $1}')
+        available_storages=$(pvesm status -content images | grep -v "Name" | awk '{print $1}' | sort -u)
+        
+        # 如果没有找到存储，则显示所有存储
+        if [ -z "$available_storages" ]; then
+            available_storages=$(pvesm status | grep -v "Name" | awk '{print $1}' | sort -u)
+        fi
+        
+        # 检查是否有可用存储
+        if [ -z "$available_storages" ]; then
+            echo -e "${RED}错误：未找到可用存储，请确认Proxmox配置${NC}"
+            read -p "按任意键返回主菜单..." 
+            main_menu
+            return 1
+        fi
         
         # 显示可用存储
         echo -e "${YELLOW}可用存储:${NC}"
@@ -501,11 +648,27 @@ function main_menu() {
             SELECTED_STORAGE=$(echo "$available_storages" | head -n1)
         else
             SELECTED_STORAGE=$(echo "$available_storages" | sed -n "${storage_choice}p")
+            if [ -z "$SELECTED_STORAGE" ]; then
+                echo -e "${RED}错误：选择的存储不存在${NC}"
+                read -p "按任意键返回..." 
+                get_storage_and_vmid "$default_vmid"
+                return $?
+            fi
         fi
         
         # 虚拟机ID
         read -p "请输入模板虚拟机ID [默认:$default_vmid]: " vmid
         SELECTED_VMID=${vmid:-$default_vmid}
+        
+        # 验证VMID是数字
+        if ! [[ "$SELECTED_VMID" =~ ^[0-9]+$ ]]; then
+            echo -e "${RED}错误：VMID必须是数字${NC}"
+            read -p "按任意键返回..." 
+            get_storage_and_vmid "$default_vmid"
+            return $?
+        fi
+        
+        return 0
     }
     
     # 处理镜像创建流程
@@ -518,6 +681,9 @@ function main_menu() {
         echo -e "${YELLOW}创建$distro $version模板${NC}"
         
         get_storage_and_vmid $vmid
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
         
         # 下载镜像
         download_image "$distro" "$version"
@@ -525,7 +691,7 @@ function main_menu() {
             echo -e "${RED}下载镜像失败，请检查网络和存储空间${NC}"
             read -p "按任意键继续..."
             main_menu
-            return
+            return 1
         fi
         
         image_file="$RESULT_IMAGE_FILE"
@@ -537,10 +703,17 @@ function main_menu() {
             echo -e "${RED}定制镜像失败${NC}"
             read -p "按任意键继续..."
             main_menu
-            return
+            return 1
         fi
         
         customized_image="$RESULT_CUSTOMIZED_IMAGE"
+        if [ -z "$customized_image" ] || [ ! -f "$customized_image" ]; then
+            echo -e "${RED}定制镜像未生成或路径无效${NC}"
+            read -p "按任意键继续..."
+            main_menu
+            return 1
+        }
+        
         echo -e "${YELLOW}定制后的镜像文件路径: $customized_image${NC}"
         
         # 创建模板
@@ -549,13 +722,14 @@ function main_menu() {
             echo -e "${RED}创建模板失败${NC}"
             read -p "按任意键继续..."
             main_menu
-            return
+            return 1
         fi
         
         echo -e "${GREEN}所有操作已完成!${NC}"
         echo -e "${YELLOW}提示:${NC} 现在您可以从模板克隆新的虚拟机，并通过Cloud-Init配置进行自定义设置。"
         read -p "按任意键继续..."
         main_menu
+        return 0
     }
     
     case $choice in
