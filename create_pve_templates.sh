@@ -622,6 +622,190 @@ function main_menu() {
         return 0
     }
     
+    # 处理所有镜像创建流程
+    function handle_all_images() {
+        show_logo
+        echo -e "${YELLOW}一次性安装所有镜像${NC}"
+        echo -e "${YELLOW}此操作将下载并导入所有支持的操作系统模板，请确保有足够的存储空间${NC}"
+        
+        # 获取存储位置
+        echo ""
+        available_storages=$(pvesm status -content images | grep -v "Name" | awk '{print $1}' | sort -u)
+        
+        # 如果没有找到存储，则显示所有存储
+        if [ -z "$available_storages" ]; then
+            available_storages=$(pvesm status | grep -v "Name" | awk '{print $1}' | sort -u)
+        fi
+        
+        # 检查是否有可用存储
+        if [ -z "$available_storages" ]; then
+            echo -e "${RED}错误：未找到可用存储，请确认Proxmox配置${NC}"
+            read -p "按任意键返回主菜单..." 
+            main_menu
+            return 1
+        fi
+        
+        # 显示可用存储
+        echo -e "${YELLOW}可用存储:${NC}"
+        echo "$available_storages" | nl
+        read -p "请选择存储 [默认:第一个存储]: " storage_choice
+        
+        if [ -z "$storage_choice" ]; then
+            selected_storage=$(echo "$available_storages" | head -n1)
+        else
+            selected_storage=$(echo "$available_storages" | sed -n "${storage_choice}p")
+            if [ -z "$selected_storage" ]; then
+                echo -e "${RED}错误：选择的存储不存在${NC}"
+                read -p "按任意键返回..." 
+                handle_all_images
+                return 1
+            fi
+        fi
+        
+        # 询问是否自动转换为模板
+        read -p "是否自动将所有虚拟机转换为模板? (y/n): " auto_template
+        auto_convert_template=0
+        if [ "$auto_template" == "y" ] || [ "$auto_template" == "Y" ]; then
+            auto_convert_template=1
+        fi
+        
+        # 开始依次创建所有镜像
+        echo -e "${GREEN}所选存储: $selected_storage${NC}"
+        echo -e "${GREEN}自动转换为模板: $([ $auto_convert_template -eq 1 ] && echo '是' || echo '否')${NC}"
+        echo -e "${YELLOW}开始创建所有镜像, 请耐心等待...${NC}"
+        
+        # 镜像列表数组
+        declare -A distros
+        distros[0,0]="centos" 
+        distros[0,1]="9-stream"
+        distros[0,2]="9000"
+        
+        distros[1,0]="centos"
+        distros[1,1]="8-stream"
+        distros[1,2]="9001"
+        
+        distros[2,0]="debian"
+        distros[2,1]="12"
+        distros[2,2]="9006"
+        
+        distros[3,0]="debian"
+        distros[3,1]="11"
+        distros[3,2]="9007"
+        
+        distros[4,0]="debian"
+        distros[4,1]="10"
+        distros[4,2]="9008"
+        
+        distros[5,0]="ubuntu"
+        distros[5,1]="24.04"
+        distros[5,2]="9014"
+        
+        distros[6,0]="ubuntu"
+        distros[6,1]="22.04"
+        distros[6,2]="9015"
+        
+        distros[7,0]="ubuntu"
+        distros[7,1]="20.04"
+        distros[7,2]="9016"
+        
+        # 循环创建所有镜像
+        for i in {0..7}; do
+            distro="${distros[$i,0]}"
+            version="${distros[$i,1]}"
+            vmid="${distros[$i,2]}"
+            
+            echo -e "\n${BLUE}=============================================${NC}"
+            echo -e "${YELLOW}[$(($i+1))/8] 开始处理 $distro $version 镜像 (VMID: $vmid)${NC}"
+            
+            # 下载镜像
+            echo -e "${YELLOW}下载 $distro $version 云镜像...${NC}"
+            download_image "$distro" "$version"
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}下载镜像失败，跳过$distro $version${NC}"
+                continue
+            fi
+            
+            image_file="$RESULT_IMAGE_FILE"
+            echo -e "${YELLOW}下载的镜像文件路径: $image_file${NC}"
+            
+            # 定制镜像
+            echo -e "${YELLOW}定制 $distro $version 镜像...${NC}"
+            customize_image "$distro" "$version" "$image_file"
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}定制镜像失败，跳过$distro $version${NC}"
+                continue
+            fi
+            
+            customized_image="$RESULT_CUSTOMIZED_IMAGE"
+            if [ -z "$customized_image" ] || [ ! -f "$customized_image" ]; then
+                echo -e "${RED}定制镜像未生成或路径无效，跳过$distro $version${NC}"
+                continue
+            fi
+            
+            echo -e "${YELLOW}定制后的镜像文件路径: $customized_image${NC}"
+            
+            # 检查虚拟机ID是否已存在
+            if check_vmid_exists $vmid; then
+                echo -e "${YELLOW}注意：ID为 $vmid 的虚拟机已存在，自动删除...${NC}"
+                qm stop $vmid &>/dev/null
+                sleep 2
+                qm destroy $vmid
+            fi
+            
+            # 创建虚拟机
+            echo -e "${YELLOW}创建虚拟机 (ID: $vmid)...${NC}"
+            qm create $vmid --name "$distro-$version-cloudinit-template" --onboot 1 --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
+            
+            # 导入磁盘
+            echo -e "${YELLOW}导入磁盘...${NC}"
+            qm importdisk $vmid "$customized_image" $selected_storage
+            
+            # 延迟以确保Proxmox完成导入
+            sleep 5
+            
+            # 检查导入结果
+            if ! qm config $vmid | grep -q "unused"; then
+                echo -e "${RED}错误：磁盘导入失败，跳过$distro $version${NC}"
+                continue
+            fi
+            
+            # 获取磁盘路径
+            disk_path=$(qm config $vmid | grep unused | head -1 | awk '{print $2}')
+            if [ -z "$disk_path" ]; then
+                echo -e "${RED}错误：找不到导入的磁盘路径，跳过$distro $version${NC}"
+                continue
+            fi
+            
+            # 配置虚拟机
+            echo -e "${YELLOW}配置虚拟机...${NC}"
+            qm set $vmid --scsihw virtio-scsi-pci --scsi0 $disk_path
+            qm set $vmid --boot c --bootdisk scsi0
+            qm set $vmid --ide2 $selected_storage:cloudinit
+            qm set $vmid --serial0 socket --vga serial0
+            qm set $vmid --agent enabled=1
+            qm set $vmid --cpu host
+            
+            # 调整磁盘大小（可选）
+            echo -e "${YELLOW}调整磁盘大小为32G...${NC}"
+            qm resize $vmid scsi0 32G
+            
+            # 如果需要自动转换为模板
+            if [ $auto_convert_template -eq 1 ]; then
+                echo -e "${YELLOW}转换为模板...${NC}"
+                qm template $vmid
+                echo -e "${GREEN}模板 $distro $version 创建完成 (ID: $vmid)${NC}"
+            else
+                echo -e "${GREEN}虚拟机 $distro $version 创建完成 (ID: $vmid)${NC}"
+            fi
+        done
+        
+        echo -e "\n${GREEN}所有操作已完成!${NC}"
+        echo -e "${YELLOW}提示:${NC} 现在您可以从模板克隆新的虚拟机，并通过Cloud-Init配置进行自定义设置。"
+        read -p "按任意键继续..."
+        main_menu
+        return 0
+    }
+    
     case $choice in
         1) handle_image_creation "centos" "9-stream" "9000" ;;
         2) handle_image_creation "centos" "8-stream" "9001" ;;
@@ -632,33 +816,7 @@ function main_menu() {
         7) handle_image_creation "ubuntu" "22.04" "9015" ;;
         8) handle_image_creation "ubuntu" "20.04" "9016" ;;
         9) 
-            show_logo
-            echo -e "${YELLOW}一次性安装所有镜像${NC}"
-            echo -e "${YELLOW}此操作将依次安装所有支持的操作系统镜像，请确保有足够的存储空间${NC}"
-            read -p "确定要继续吗? (y/n): " confirm_all
-            if [ "$confirm_all" == "y" ] || [ "$confirm_all" == "Y" ]; then
-                # 获取存储位置
-                get_storage_and_vmid 9000
-                if [ $? -eq 0 ]; then
-                    storage=$SELECTED_STORAGE
-                    
-                    # 依次创建各个镜像
-                    handle_image_creation "centos" "9-stream" "9000"
-                    handle_image_creation "centos" "8-stream" "9001"
-                    handle_image_creation "debian" "12" "9006"
-                    handle_image_creation "debian" "11" "9007"
-                    handle_image_creation "debian" "10" "9008"
-                    handle_image_creation "ubuntu" "24.04" "9014"
-                    handle_image_creation "ubuntu" "22.04" "9015"
-                    handle_image_creation "ubuntu" "20.04" "9016"
-                    
-                    echo -e "${GREEN}所有镜像安装完成!${NC}"
-                fi
-            else
-                echo -e "${YELLOW}已取消操作${NC}"
-            fi
-            read -p "按任意键继续..."
-            main_menu
+            handle_all_images
             ;;
         0)
             echo -e "${GREEN}感谢使用，再见!${NC}"
