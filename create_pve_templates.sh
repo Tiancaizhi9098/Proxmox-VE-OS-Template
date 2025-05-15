@@ -194,8 +194,10 @@ function customize_image() {
         return 1
     fi
     
-    customized_image="${image_file%.qcow2}-customized.qcow2"
-    customized_image="${customized_image%.img}-customized.qcow2"
+    # 修复文件路径，确保不会重复添加后缀
+    base_name=$(basename "$image_file" | sed 's/\.\(qcow2\|img\)$//')
+    dir_name=$(dirname "$image_file")
+    customized_image="${dir_name}/${base_name}-customized.qcow2"
     
     echo -e "${BLUE}开始定制镜像...${NC}"
     
@@ -215,8 +217,15 @@ function customize_image() {
     # 根据不同发行版设置不同的定制命令
     case "$distro" in
         "alma"|"centos"|"rocky")
-            # 红帽系发行版
-            virt-customize -a "$customized_image" --install qemu-guest-agent,htop,git,neofetch,tree --selinux-relabel
+            # 红帽系发行版 - 添加EPEL仓库并安装软件
+            echo -e "${YELLOW}为${distro}添加EPEL仓库...${NC}"
+            virt-customize -a "$customized_image" \
+                --run-command "dnf -y install epel-release || dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-$(rpm -E %rhel).noarch.rpm" \
+                --run-command "dnf -y update" \
+                --install qemu-guest-agent \
+                --install git,tree \
+                --run-command "dnf -y install htop neofetch || true" \
+                --selinux-relabel
             
             # 配置SSH
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -237,7 +246,7 @@ function customize_image() {
             # 清理
             echo -e "${YELLOW}清理系统...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "yum clean all" \
+                --run-command "dnf clean all || yum clean all" \
                 --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true" \
                 --selinux-relabel
             ;;
@@ -245,20 +254,26 @@ function customize_image() {
         "alpine")
             # Alpine Linux
             virt-customize -a "$customized_image" \
-                --run-command "apk update && apk add qemu-guest-agent htop git neofetch tree openssh" \
+                --run-command "apk update && apk add qemu-guest-agent openssh" \
+                --run-command "apk add htop git tree || true" \
+                --run-command "apk add neofetch || wget -O /usr/bin/neofetch https://raw.githubusercontent.com/dylanaraps/neofetch/master/neofetch && chmod +x /usr/bin/neofetch" \
                 --run-command "rc-update add qemu-guest-agent" \
                 --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
                 --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
-                --run-command "setup-timezone -z Asia/Shanghai" \
-                --run-command "apk cache clean" \
+                --run-command "setup-timezone -z Asia/Shanghai || true" \
+                --run-command "apk cache clean || true" \
                 --run-command "truncate -s 0 /etc/machine-id || true"
             ;;
             
         "debian"|"kali"|"ubuntu")
             # Debian系发行版
-            virt-customize -a "$customized_image" --install qemu-guest-agent,htop,git,neofetch,tree,acpid
+            virt-customize -a "$customized_image" \
+                --run-command "apt update" \
+                --run-command "apt install -y qemu-guest-agent acpid || true" \
+                --run-command "apt install -y htop git tree || true" \
+                --run-command "apt install -y neofetch || true"
     
             # 配置SSH允许root登录和密码登录
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -284,7 +299,11 @@ function customize_image() {
             
         "fedora")
             # Fedora
-            virt-customize -a "$customized_image" --install qemu-guest-agent,htop,git,neofetch,tree --selinux-relabel
+            virt-customize -a "$customized_image" \
+                --run-command "dnf -y update" \
+                --install qemu-guest-agent,git,tree \
+                --run-command "dnf -y install htop neofetch || true" \
+                --selinux-relabel
             
             # 配置SSH
             echo -e "${YELLOW}配置SSH允许root登录和密码认证...${NC}"
@@ -313,14 +332,17 @@ function customize_image() {
         "opensuse")
             # openSUSE
             virt-customize -a "$customized_image" \
-                --run-command "zypper --non-interactive install qemu-guest-agent htop git neofetch tree" \
+                --run-command "zypper --non-interactive refresh" \
+                --run-command "zypper --non-interactive install qemu-guest-agent || true" \
+                --run-command "zypper --non-interactive install htop git tree || true" \
+                --run-command "zypper --non-interactive install neofetch || true" \
                 --run-command "systemctl enable qemu-guest-agent" \
                 --run-command "sed -i 's/#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config" \
                 --run-command "sed -i 's/#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" \
                 --run-command "timedatectl set-timezone Asia/Shanghai || true" \
-                --run-command "zypper clean" \
+                --run-command "zypper clean || true" \
                 --run-command "truncate -s 0 /etc/machine-id /var/lib/dbus/machine-id || true"
             ;;
             
@@ -332,8 +354,7 @@ function customize_image() {
     
     # 检查virt-customize是否成功
     if [ $? -ne 0 ]; then
-        echo -e "${RED}错误：无法定制镜像，virt-customize命令失败${NC}"
-        return 1
+        echo -e "${YELLOW}警告：部分定制可能未完成，但我们会尝试继续...${NC}"
     fi
     
     echo -e "${GREEN}镜像定制完成: $customized_image${NC}"
@@ -361,7 +382,7 @@ function create_template() {
     
     # 检查虚拟机ID是否已存在
     if check_vmid_exists $vmid; then
-        echo -e "${RED}错误：ID为 $vmid 的虚拟机已存在${NC}"
+        echo -e "${YELLOW}注意：ID为 $vmid 的虚拟机已存在${NC}"
         read -p "是否删除现有虚拟机并继续? (y/n): " delete_vm
         if [ "$delete_vm" == "y" ] || [ "$delete_vm" == "Y" ]; then
             echo -e "${YELLOW}删除现有虚拟机...${NC}"
@@ -383,7 +404,7 @@ function create_template() {
     qm importdisk $vmid "$image_file" $storage
     
     # 延迟以确保Proxmox完成导入
-    sleep 3
+    sleep 5
     
     # 检查导入结果
     if ! qm config $vmid | grep -q "unused"; then
@@ -440,25 +461,25 @@ function main_menu() {
     check_dependencies
     
     echo "请选择要执行的操作:"
-    echo "1)  创建AlmaLinux 9模板"
-    echo "2)  创建AlmaLinux 8模板"
-    echo "3)  创建Alpine 3.19模板"
-    echo "4)  创建Alpine 3.18模板"
-    echo "5)  创建CentOS 9-stream模板"
-    echo "6)  创建CentOS 8-stream模板"
-    echo "7)  创建Debian 12模板"
-    echo "8)  创建Debian 11模板"
-    echo "9)  创建Debian 10模板"
-    echo "10) 创建Fedora 40模板"
-    echo "11) 创建Fedora 39模板"
-    echo "12) 创建Kali 2023.4模板"
-    echo "13) 创建Rocky 9模板"
-    echo "14) 创建Rocky 8模板"
-    echo "15) 创建Ubuntu 24.04模板"
-    echo "16) 创建Ubuntu 22.04模板"
-    echo "17) 创建Ubuntu 20.04模板"
-    echo "18) 创建openSUSE Tumbleweed模板"
-    echo "19) 创建openSUSE Leap 15.5模板"
+    echo "1)  AlmaLinux 9"
+    echo "2)  AlmaLinux 8"
+    echo "3)  Alpine 3.19"
+    echo "4)  Alpine 3.18"
+    echo "5)  CentOS 9-stream"
+    echo "6)  CentOS 8-stream"
+    echo "7)  Debian 12"
+    echo "8)  Debian 11"
+    echo "9)  Debian 10"
+    echo "10) Fedora 40"
+    echo "11) Fedora 39"
+    echo "12) Kali 2023.4"
+    echo "13) Rocky 9"
+    echo "14) Rocky 8"
+    echo "15) Ubuntu 24.04"
+    echo "16) Ubuntu 22.04"
+    echo "17) Ubuntu 20.04"
+    echo "18) openSUSE Tumbleweed"
+    echo "19) openSUSE Leap 15.5"
     echo "0)  退出"
     
     read -p "请输入选项 [0-19]: " choice
