@@ -421,7 +421,8 @@ function create_template() {
     
     # 创建虚拟机
     echo -e "${YELLOW}创建虚拟机 (ID: $vmid)...${NC}"
-    qm create $vmid --name "$distro-$version-cloudinit-template" --onboot 1 --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
+    distro_cap=$(echo "$distro" | sed 's/^\(.\)/\U\1/')
+    qm create $vmid --name "$distro_cap-$version" --onboot 1 --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
     
     # 导入磁盘
     echo -e "${YELLOW}导入磁盘...${NC}"
@@ -456,9 +457,9 @@ function create_template() {
     qm set $vmid --agent enabled=1
     qm set $vmid --cpu host
     
-    # 调整磁盘大小（可选）
-    echo -e "${YELLOW}调整磁盘大小为32G...${NC}"
-    qm resize $vmid scsi0 32G
+    # 调整磁盘大小
+    echo -e "${YELLOW}调整磁盘大小为5G...${NC}"
+    qm resize $vmid scsi0 5G
     
     # 显示配置信息
     echo -e "${GREEN}虚拟机配置详情:${NC}"
@@ -477,6 +478,38 @@ function create_template() {
     fi
     
     echo ""
+    return 0
+}
+
+# 添加删除镜像功能
+function delete_all_images() {
+    show_logo
+    
+    local download_dir="/root/qcow"
+    
+    if [ ! -d "$download_dir" ]; then
+        echo -e "${YELLOW}镜像目录 $download_dir 不存在${NC}"
+        read -p "按任意键返回主菜单..." 
+        main_menu
+        return 0
+    fi
+    
+    echo -e "${RED}警告: 此操作将删除 $download_dir 目录下的所有镜像文件!${NC}"
+    echo -e "${YELLOW}这些文件占用的空间大约为:${NC}"
+    du -sh $download_dir
+    echo ""
+    read -p "确定要删除所有镜像文件吗? (y/n): " confirm_delete
+    
+    if [ "$confirm_delete" == "y" ] || [ "$confirm_delete" == "Y" ]; then
+        echo -e "${YELLOW}删除所有镜像文件...${NC}"
+        rm -f $download_dir/*.qcow2 $download_dir/*.img $download_dir/*-customized*
+        echo -e "${GREEN}所有镜像文件已删除${NC}"
+    else
+        echo -e "${YELLOW}操作已取消${NC}"
+    fi
+    
+    read -p "按任意键返回主菜单..." 
+    main_menu
     return 0
 }
 
@@ -504,9 +537,10 @@ function main_menu() {
     echo "7) Ubuntu 22.04"
     echo "8) Ubuntu 20.04"
     echo "9) 一次性安装所有镜像"
+    echo "10) 删除所有镜像文件"
     echo "0) 退出"
     
-    read -p "请输入选项 [0-9]: " choice
+    read -p "请输入选项 [0-10]: " choice
     
     # 获取可用存储和虚拟机ID
     function get_storage_and_vmid() {
@@ -754,7 +788,8 @@ function main_menu() {
             
             # 创建虚拟机
             echo -e "${YELLOW}创建虚拟机 (ID: $vmid)...${NC}"
-            qm create $vmid --name "$distro-$version-cloudinit-template" --onboot 1 --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
+            distro_cap=$(echo "$distro" | sed 's/^\(.\)/\U\1/')
+            qm create $vmid --name "$distro_cap-$version" --onboot 1 --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
             
             # 导入磁盘
             echo -e "${YELLOW}导入磁盘...${NC}"
@@ -785,9 +820,9 @@ function main_menu() {
             qm set $vmid --agent enabled=1
             qm set $vmid --cpu host
             
-            # 调整磁盘大小（可选）
-            echo -e "${YELLOW}调整磁盘大小为32G...${NC}"
-            qm resize $vmid scsi0 32G
+            # 调整磁盘大小
+            echo -e "${YELLOW}调整磁盘大小为5G...${NC}"
+            qm resize $vmid scsi0 5G
             
             # 如果需要自动转换为模板
             if [ $auto_convert_template -eq 1 ]; then
@@ -817,6 +852,9 @@ function main_menu() {
         8) handle_image_creation "ubuntu" "20.04" "9016" ;;
         9) 
             handle_all_images
+            ;;
+        10)
+            delete_all_images
             ;;
         0)
             echo -e "${GREEN}感谢使用，再见!${NC}"
