@@ -289,10 +289,8 @@ function customize_image() {
                 --selinux-relabel || true
 
             # 禁用网络等待服务，避免启动挂起
-            echo -e "${YELLOW}禁用网络等待服务...${NC}"
+            echo -e "${YELLOW}配置网络服务...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
-                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
                 --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
                 --selinux-relabel || true
                 
@@ -341,14 +339,10 @@ function customize_image() {
                 --run-command "grep -q '^PermitRootLogin yes' /etc/ssh/sshd_config || echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config" \
                 --run-command "grep -q '^PasswordAuthentication yes' /etc/ssh/sshd_config || echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config" || true
             
-            # 禁用网络等待服务，避免启动挂起
-            echo -e "${YELLOW}配置网络等待服务...${NC}"
+            # 配置网络服务
+            echo -e "${YELLOW}配置网络服务...${NC}"
             virt-customize -a "$customized_image" \
-                --run-command "systemctl disable systemd-networkd-wait-online.service || true" \
-                --run-command "systemctl disable NetworkManager-wait-online.service || true" \
-                --run-command "if [ -f /etc/netplan/01-netcfg.yaml ]; then mkdir -p /etc/cloud/cloud.cfg.d/ && echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg || true; fi" \
-                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" \
-                --run-command "mkdir -p /etc/systemd/system/systemd-networkd-wait-online.service.d/ && echo '[Service]\nTimeoutStartSec=2sec' > /etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf || true" || true
+                --run-command "if [ -f /etc/cloud/cloud.cfg ]; then sed -i 's/^ - growpart/# - growpart/' /etc/cloud/cloud.cfg || true; fi" || true
             
             # 设置时区
             echo -e "${YELLOW}设置时区为Asia/Shanghai...${NC}"
